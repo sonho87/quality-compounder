@@ -522,7 +522,7 @@ with tab4:
                             {news_text}
                             """
                             
-                            model = genai.GenerativeModel('gemini-1.5-pro-latest')
+                            model = genai.GenerativeModel('gemini-1.5-pro')
                             response = model.generate_content(system_context + "\n\nUser Prompt: " + prompt)
                             
                             st.markdown(response.text)
