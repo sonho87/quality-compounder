@@ -8,11 +8,12 @@ import requests
 import xml.etree.ElementTree as ET
 import time
 import os
+import google.generativeai as genai
 
-st.set_page_config(page_title="Quality Compounder V6.4", page_icon="👑", layout="wide")
+st.set_page_config(page_title="Quality Compounder V6.5", page_icon="👑", layout="wide")
 
 # --- SIDEBAR CONTROLS ---
-st.sidebar.title("👑 Quality Compounder V6.4")
+st.sidebar.title("👑 Quality Compounder V6.5")
 st.sidebar.subheader("📂 Upload NSE Stock List")
 uploaded_file = st.sidebar.file_uploader("Upload CSV with SYMBOL column", type=['csv'])
 
@@ -24,7 +25,14 @@ if st.sidebar.button("🔄 Clear Cache & Restart"):
 st.sidebar.divider()
 st.sidebar.subheader("🧪 Developer Controls")
 offline_mode = st.sidebar.checkbox("🔌 Offline Test Mode (15 Stocks)", value=True)
-st.sidebar.caption("When checked, saves a micro-database to your Mac and runs 100% offline.")
+st.sidebar.caption("When checked, runs offline.")
+
+# --- AI CONFIGURATION ---
+st.sidebar.divider()
+st.sidebar.subheader("🤖 AI Co-Pilot")
+gemini_api_key = st.sidebar.text_input("Enter Gemini API Key", type="password")
+if gemini_api_key:
+    genai.configure(api_key=gemini_api_key)
 
 # --- RISK MANAGEMENT ---
 st.sidebar.divider()
@@ -249,9 +257,12 @@ def build_v6_screener(tickers_list, offline=False, slider_6m=0.30, slider_1y=0.4
         
         rating, score = classify_compounder(stock["ret_6m"], stock["ret_1y"], stock["ret_3y"], stock["structural"], consistent_growth, roe)
         
-        stop_price = current_price * 0.85
-        target_price = current_price * 1.30 if score == 5 else current_price * 1.20
-        shares, investment = calculate_position_size(portfolio_capital, current_price, stop_price, risk_per_trade_pct, max_position_cap_pct)
+        # --- THE NEW SMART ENTRY MATH ---
+        entry_price = current_price * 0.98 # Require a 2% pullback from today's close
+        stop_price = entry_price * 0.85 # Stop is 15% below the Limit Entry
+        target_price = entry_price * 1.30 if score == 5 else entry_price * 1.20
+        
+        shares, investment = calculate_position_size(portfolio_capital, entry_price, stop_price, risk_per_trade_pct, max_position_cap_pct)
         
         results.append({
             "Ticker": ticker.replace('.NS', ''), "Full_Ticker": ticker,
@@ -259,7 +270,8 @@ def build_v6_screener(tickers_list, offline=False, slider_6m=0.30, slider_1y=0.4
             "Price (₹)": current_price, "Vol (L)": stock["avg_vol_lakhs"],
             "Structural": "✓" if stock["structural"] else "✗", "Structure Note": stock["structure_reason"],
             "Growth": "✓" if consistent_growth else "?", "Profit↑": profit_growth, "ROE": roe, "P/E": pe,
-            "Target (₹)": target_price, "Stop (₹)": stop_price, "Shares": shares, "Investment (₹)": investment,
+            "Entry (₹)": entry_price, "Target (₹)": target_price, "Stop (₹)": stop_price, 
+            "Shares": shares, "Investment (₹)": investment,
             "1-Month": stock["ret_1m"], "6-Month": stock["ret_6m"], "1-Year": stock["ret_1y"], "3-Year": stock["ret_3y"],
             "Sector": sector, "M.Cap (Cr)": (mcap / 10000000) if mcap else None
         })
@@ -293,11 +305,11 @@ if hist_data is None or 'Close' not in hist_data.columns:
     st.error("🚨 Connection failed. Clear cache.")
     st.stop()
 
-with st.spinner("🛡️ Running V6.4 Compounder Funnel..."):
+with st.spinner("🛡️ Running V6.5 Compounder Funnel..."):
     master_df = build_v6_screener(all_tickers, offline=offline_mode, slider_6m=min_6m_return/100, slider_1y=min_1y_return/100)
 
 # --- UI TABS ---
-tab1, tab2, tab3 = st.tabs(["👑 Quality Compounders", "📊 Full Screener", "🔍 Deep Dive"])
+tab1, tab2, tab3, tab4 = st.tabs(["👑 Quality Compounders", "📊 Full Screener", "🔍 Deep Dive", "🤖 AI Co-Pilot"])
 
 def format_pct(val): return f"{val:.1%}" if pd.notna(val) else "N/A"
 def style_rating(val):
@@ -314,7 +326,6 @@ with tab1:
     if indices:
         cols = st.columns(len(indices))
         for i, idx in enumerate(indices):
-            # FIXED: Removed delta_color parameter so it defaults to standard Red/Green
             cols[i].metric(idx['Name'], f"₹{idx['Price']:,.0f}", f"{idx['Change']:.2%}")
     
     st.divider()
@@ -325,22 +336,22 @@ with tab1:
         top_df = top_df.sort_values(['Score', '1-Year'], ascending=[False, False]).head(20)
         
         if len(top_df) > 0:
-            display_cols = ['Ticker', 'Rating', 'Structural', 'Growth', 'Price (₹)', 'Investment (₹)', '6-Month', '1-Year', '3-Year']
+            display_cols = ['Ticker', 'Rating', 'Structural', 'Growth', 'Price (₹)', 'Entry (₹)', 'Investment (₹)', '6-Month', '1-Year']
             display_df = top_df[display_cols].copy()
             
             display_df['6-Month'] = display_df['6-Month'].apply(format_pct)
             display_df['1-Year'] = display_df['1-Year'].apply(format_pct)
-            display_df['3-Year'] = display_df['3-Year'].apply(format_pct)
             display_df['Price (₹)'] = display_df['Price (₹)'].apply(lambda x: f"₹{x:.2f}")
+            display_df['Entry (₹)'] = display_df['Entry (₹)'].apply(lambda x: f"₹{x:.2f}")
             display_df['Investment (₹)'] = display_df['Investment (₹)'].apply(lambda x: f"₹{x:,.0f}")
             
             st.dataframe(display_df.style.map(style_rating, subset=['Rating']), use_container_width=True, hide_index=True)
             
             col1, col2 = st.columns(2)
             col1.metric("Total Suggested Investment", f"₹{top_df['Investment (₹)'].sum():,.0f}")
-            col2.metric("Total Capital at Risk", f"₹{(top_df['Shares'] * (top_df['Price (₹)'] - top_df['Stop (₹)'])).sum():,.0f}")
+            col2.metric("Total Capital at Risk", f"₹{(top_df['Shares'] * (top_df['Entry (₹)'] - top_df['Stop (₹)'])).sum():,.0f}")
         else:
-            st.warning("⚠️ No stocks passed the V6.4 Quality criteria today.")
+            st.warning("⚠️ No stocks passed the V6.5 Quality criteria today.")
     else:
         st.warning("No stocks passed the initial technical screen.")
 
@@ -348,14 +359,14 @@ with tab2:
     st.subheader("📊 Full Screener Results")
     if not master_df.empty:
         sector_df = master_df.sort_values(['Score', '1-Year'], ascending=[False, False])
-        display_cols = ['Ticker', 'Rating', 'Structural', 'Price (₹)', 'Vol (L)', '1-Month', '6-Month', '1-Year', 'P/E']
+        display_cols = ['Ticker', 'Rating', 'Structural', 'Price (₹)', 'Entry (₹)', '1-Month', '6-Month', '1-Year', 'P/E']
         display_df = sector_df[display_cols].copy()
         
         display_df['1-Month'] = display_df['1-Month'].apply(format_pct)
         display_df['6-Month'] = display_df['6-Month'].apply(format_pct)
         display_df['1-Year'] = display_df['1-Year'].apply(format_pct)
         display_df['Price (₹)'] = display_df['Price (₹)'].apply(lambda x: f"₹{x:.2f}")
-        display_df['Vol (L)'] = display_df['Vol (L)'].apply(lambda x: f"{x:.1f} L")
+        display_df['Entry (₹)'] = display_df['Entry (₹)'].apply(lambda x: f"₹{x:.2f}")
         display_df['P/E'] = display_df['P/E'].apply(lambda x: f"{x:.1f}" if pd.notna(x) else "N/A")
         
         st.dataframe(display_df.style.map(style_rating, subset=['Rating']), use_container_width=True, hide_index=True)
@@ -371,14 +382,12 @@ with tab3:
             full_ticker = row['Full_Ticker']
             
             st.divider()
-            
-            # --- FIXED: ACTION SIGNAL UI ---
             st.metric("Current Price", f"₹{row['Price (₹)']:.2f}")
             
             if '👑' in row['Rating'] or '🟢' in row['Rating']:
-                st.success("#### 🎯 Action Required: 🟢 BUY (Strong Setup)")
+                st.success("#### 🎯 Action Required: 🟢 BUY ON DIP (Strong Setup)")
             elif '🟡' in row['Rating']:
-                st.info("#### 🎯 Action Required: 🟢 BUY (Emerging Winner)")
+                st.info("#### 🎯 Action Required: 🟢 BUY ON DIP (Emerging Winner)")
             elif '🔵' in row['Rating']:
                 st.warning("#### 🎯 Action Required: 🟡 WATCH (No Fundamentals)")
             else:
@@ -392,8 +401,9 @@ with tab3:
                 st.caption("💡 *To reach '👑 MONOPOLY' status, this stock needs: 3-Year Return > 150%, ROE > 15%, and Consistent Profit Growth.*")
             
             st.divider()
-            st.markdown("### 📝 Investment Plan")
-            st.info(f"🔵 **Entry:** ₹{row['Price (₹)']:.2f}")
+            st.markdown("### 📝 Strict Execution Plan")
+            st.warning("⚠️ **Wait for the 2% Dip. Do not buy at Current Market Price.**")
+            st.info(f"🔵 **Limit Order Entry:** ₹{row['Entry (₹)']:.2f}")
             st.success(f"🟢 **Target (6m):** ₹{row['Target (₹)']:.2f}")
             st.error(f"🔴 **Stop Loss:** ₹{row['Stop (₹)']:.2f} *(15% buffer)*")
             
@@ -432,6 +442,10 @@ with tab3:
                     fig.add_trace(go.Bar(x=chart_data.index, y=chart_data['Volume'], name='Volume', marker_color=vol_colors), row=2, col=1)
                     
                     fig.update_layout(template='plotly_white', height=500, showlegend=True, margin=dict(l=0, r=0, t=30, b=0))
+                    
+                    # Add a horizontal line representing the Entry Limit Order
+                    fig.add_hline(y=row['Entry (₹)'], line_dash="dash", line_color="green", annotation_text="Limit Entry (2% Dip)")
+                    
                     st.plotly_chart(fig, use_container_width=True)
                     
             st.divider()
@@ -444,3 +458,74 @@ with tab3:
                     st.markdown(f"**[{item['Title']}]({item['Link']})**")
                     st.caption(f"{item['Publisher']} • {item['Date']}")
                     st.write("---")
+
+# --- TAB 4: GEMINI AI CO-PILOT ---
+with tab4:
+    st.subheader("🤖 Gemini Quant Co-Pilot")
+    
+    if not gemini_api_key:
+        st.warning("⚠️ Please enter your Gemini API Key in the sidebar to activate the AI Co-Pilot.")
+    elif master_df.empty:
+        st.warning("⚠️ Please run the screener first so the AI has data to analyze.")
+    else:
+        colA, colB = st.columns([1, 2])
+        
+        with colA:
+            st.markdown("### Context Selection")
+            ai_stock_list = master_df.sort_values('Score', ascending=False)['Ticker'].tolist()
+            selected_ai_stock = st.selectbox("Select Stock to Feed AI:", ai_stock_list, key="ai_select")
+            row = master_df[master_df['Ticker'] == selected_ai_stock].iloc[0]
+            
+            st.info("💡 **Try asking:**\n- Summarize the recent news impact.\n- Does the P/E ratio justify the growth?\n- Is a 2% dip a realistic entry point today?")
+            
+            # Fetch latest news to feed the AI
+            with st.spinner("Gathering context for AI..."):
+                recent_news = fetch_live_news(f"{selected_ai_stock} NSE stock India news", offline=offline_mode)
+                news_text = "\n".join([f"- {item['Title']} ({item['Publisher']})" for item in recent_news]) if recent_news else "No recent news."
+                
+            st.success(f"Context loaded for {selected_ai_stock}. The AI is ready.")
+
+        with colB:
+            # Setup Chat Interface
+            if "messages" not in st.session_state:
+                st.session_state.messages = []
+
+            # Display chat history
+            for message in st.session_state.messages:
+                with st.chat_message(message["role"]):
+                    st.markdown(message["content"])
+
+            # User Input
+            if prompt := st.chat_input(f"Ask Gemini about {selected_ai_stock}..."):
+                st.session_state.messages.append({"role": "user", "content": prompt})
+                with st.chat_message("user"):
+                    st.markdown(prompt)
+
+                with st.chat_message("assistant"):
+                    with st.spinner("Analyzing quantitative data and news..."):
+                        try:
+                            # Build the specific system prompt so the AI knows what we are looking at
+                            system_context = f"""
+                            You are a quantitative trading assistant advising a professional trader. 
+                            Analyze the following stock context and answer the user's prompt directly and concisely.
+                            
+                            Stock Ticker: {selected_ai_stock}
+                            System Rating: {row['Rating']}
+                            Current Price: ₹{row['Price (₹)']}
+                            Limit Order Entry: ₹{row['Entry (₹)']}
+                            1-Year Return: {row['1-Year']:.1%}
+                            QoQ Profit Growth: {row['Profit↑']}
+                            P/E Ratio: {row['P/E']}
+                            ROE: {row['ROE']}
+                            
+                            Recent News Headlines:
+                            {news_text}
+                            """
+                            
+                            model = genai.GenerativeModel('gemini-1.5-pro-latest')
+                            response = model.generate_content(system_context + "\n\nUser Prompt: " + prompt)
+                            
+                            st.markdown(response.text)
+                            st.session_state.messages.append({"role": "assistant", "content": response.text})
+                        except Exception as e:
+                            st.error(f"AI Error: Make sure your API key is valid. Detail: {e}")
