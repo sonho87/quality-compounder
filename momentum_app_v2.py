@@ -10,10 +10,17 @@ import time
 import os
 import google.generativeai as genai
 
-st.set_page_config(page_title="Quality Compounder V6.7", page_icon="👑", layout="wide")
+st.set_page_config(page_title="Quality Compounder V6.8", page_icon="👑", layout="wide")
+
+# --- ANTI-BLOCKING BROWSER SPOOFER ---
+# This tricks Yahoo into thinking the app is a real human browser
+yf_session = requests.Session()
+yf_session.headers.update({
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+})
 
 # --- SIDEBAR CONTROLS ---
-st.sidebar.title("👑 Quality Compounder V6.7")
+st.sidebar.title("👑 Quality Compounder V6.8")
 st.sidebar.subheader("📂 Upload NSE Stock List")
 uploaded_file = st.sidebar.file_uploader("Upload CSV with SYMBOL column", type=['csv'])
 
@@ -84,7 +91,7 @@ def fetch_market_indices(offline=False):
     tickers = ['^NSEI', '^NSEBANK', '^CNXIT', '^CNXMETAL', '^CNXENERGY']
     names = ['NIFTY 50', 'BANK', 'IT', 'METAL', 'ENERGY']
     try:
-        df = yf.download(tickers, period="5d", progress=False, threads=False)
+        df = yf.download(tickers, period="5d", progress=False, threads=False, session=yf_session)
         if df.empty: return []
         closes = df['Close'].ffill()
         results = []
@@ -105,7 +112,7 @@ def fetch_bulk_price_data(tickers, offline=False):
         if os.path.exists("v6_local_test_data.pkl"):
             return pd.read_pickle("v6_local_test_data.pkl")
         else:
-            df = yf.download(tickers, period="3y", progress=False, threads=True)
+            df = yf.download(tickers, period="3y", progress=False, threads=True, session=yf_session)
             df.to_pickle("v6_local_test_data.pkl")
             return df
 
@@ -120,7 +127,7 @@ def fetch_bulk_price_data(tickers, offline=False):
     try:
         for i, chunk in enumerate(chunks):
             status_text.text(f"📥 Downloading 3-Year Price Batch {i+1} of {len(chunks)}...")
-            temp_df = yf.download(chunk, period="3y", progress=False, threads=True)
+            temp_df = yf.download(chunk, period="3y", progress=False, threads=True, session=yf_session)
             if temp_df is not None and not temp_df.empty:
                 if combined_data is None: combined_data = temp_df
                 else: combined_data = pd.concat([combined_data, temp_df], axis=1)
@@ -161,7 +168,9 @@ def detect_structural_strength(close_series):
     elif not quarters_rising: return False, "Inconsistent quarterly highs"
     else: return False, f"Excessive drawdown ({max_dd:.1%})"
 
-def classify_compounder(ret_6m, ret_1y, ret_3y, structural, consistent_growth, roe):
+def classify_compounder(ret_6m, ret_1y, ret_3y, structural, consistent_growth, roe, missing_fundamentals=False):
+    if missing_fundamentals and structural:
+        return "⚠️ DATA BLOCKED (Strong Structure)", 3
     if (pd.notna(ret_3y) and ret_3y >= 1.50 and structural and consistent_growth and pd.notna(roe) and roe > 0.15):
         return "👑 MONOPOLY/DUOPOLY", 5
     if (pd.notna(ret_1y) and ret_1y >= 0.40 and structural and consistent_growth):
@@ -185,7 +194,7 @@ def calculate_position_size(capital, entry_price, stop_price, risk_pct, max_cap_
         total_investment = shares_allowed * entry_price
     return shares_allowed, total_investment
 
-# --- NEW: ON-DEMAND SINGLE STOCK EVALUATOR ---
+# --- ON-DEMAND SINGLE STOCK EVALUATOR ---
 @st.cache_data(show_spinner=False, ttl=600)
 def evaluate_single_stock(full_ticker, _hist_data, offline, capital, risk_pct, max_cap_pct):
     ticker_clean = full_ticker.replace('.NS', '')
@@ -208,27 +217,39 @@ def evaluate_single_stock(full_ticker, _hist_data, offline, capital, risk_pct, m
     structural, structure_reason = detect_structural_strength(close)
     
     profit_growth, consistent_growth, roe, pe, sector, mcap = None, False, None, None, "N/A", None
+    missing_fundamentals = False
+    
     if offline:
         profit_growth, consistent_growth, roe, pe, sector = 0.18, True, 0.22, 45.0, "Technology"
     else:
         try:
-            tkr = yf.Ticker(full_ticker)
+            # Using the spoofed session to bypass Yahoo blocks
+            tkr = yf.Ticker(full_ticker, session=yf_session)
             info = tkr.info
-            sector = info.get('sector', 'N/A')
-            mcap = info.get('marketCap')
-            pe = info.get('trailingPE')
-            roe = info.get('returnOnEquity')
-            q_fin = tkr.quarterly_financials
-            if q_fin is not None and not q_fin.empty and 'Net Income' in q_fin.index:
-                ni = q_fin.loc['Net Income'].dropna()
-                if len(ni) >= 3:
-                    growth_rates = [(ni.iloc[j] / ni.iloc[j+1]) - 1 for j in range(min(3, len(ni)-1)) if ni.iloc[j+1] != 0]
-                    if len(growth_rates) >= 2:
-                        profit_growth = growth_rates[0] 
-                        consistent_growth = sum(1 for g in growth_rates if g > 0) >= 2
-        except: pass
+            
+            # If info is completely empty, Yahoo blocked us
+            if not info or len(info) < 5:
+                missing_fundamentals = True
+            else:
+                sector = info.get('sector', 'N/A')
+                mcap = info.get('marketCap')
+                pe = info.get('trailingPE')
+                roe = info.get('returnOnEquity')
+                
+                q_fin = tkr.quarterly_financials
+                if q_fin is not None and not q_fin.empty and 'Net Income' in q_fin.index:
+                    ni = q_fin.loc['Net Income'].dropna()
+                    if len(ni) >= 3:
+                        growth_rates = [(ni.iloc[j] / ni.iloc[j+1]) - 1 for j in range(min(3, len(ni)-1)) if ni.iloc[j+1] != 0]
+                        if len(growth_rates) >= 2:
+                            profit_growth = growth_rates[0] 
+                            consistent_growth = sum(1 for g in growth_rates if g > 0) >= 2
+                else:
+                    missing_fundamentals = True
+        except: 
+            missing_fundamentals = True
 
-    rating, score = classify_compounder(ret_6m, ret_1y, ret_3y, structural, consistent_growth, roe)
+    rating, score = classify_compounder(ret_6m, ret_1y, ret_3y, structural, consistent_growth, roe, missing_fundamentals)
     
     entry_price = current_price * 0.98 
     stop_price = entry_price * 0.85 
@@ -241,6 +262,7 @@ def evaluate_single_stock(full_ticker, _hist_data, offline, capital, risk_pct, m
         "Price (₹)": current_price, "Vol (L)": avg_vol_lakhs,
         "Structural": "✓" if structural else "✗", "Structure Note": structure_reason,
         "Growth": "✓" if consistent_growth else "?", "Profit↑": profit_growth, "ROE": roe, "P/E": pe,
+        "Missing Data": missing_fundamentals,
         "Entry (₹)": entry_price, "Target (₹)": target_price, "Stop (₹)": stop_price, 
         "Shares": shares, "Investment (₹)": investment,
         "1-Month": ret_1m, "6-Month": ret_6m, "1-Year": ret_1y, "3-Year": ret_3y,
@@ -313,7 +335,7 @@ if hist_data is None or 'Close' not in hist_data.columns:
     st.error("🚨 Connection failed. Clear cache.")
     st.stop()
 
-with st.spinner("🛡️ Running V6.7 Compounder Funnel..."):
+with st.spinner("🛡️ Running V6.8 Compounder Funnel..."):
     master_df = build_v6_screener(all_tickers, offline=offline_mode, slider_6m=min_6m_return/100, slider_1y=min_1y_return/100)
 
 # --- UI TABS ---
@@ -324,6 +346,7 @@ def style_rating(val):
     if '👑' in val: return 'background-color: #ffd700; color: #000; font-weight: bold;'
     if '🟢' in val: return 'background-color: #d4edda; color: #155724;'
     if '🟡' in val: return 'background-color: #fff3cd; color: #856404;'
+    if '⚠️' in val: return 'background-color: #e2e3e5; color: #383d41;'
     if '🔵' in val: return 'background-color: #d1ecf1; color: #0c5460;'
     if '🔴' in val: return 'background-color: #f8d7da; color: #721c24;'
     return ''
@@ -354,12 +377,8 @@ with tab1:
             display_df['Investment (₹)'] = display_df['Investment (₹)'].apply(lambda x: f"₹{x:,.0f}")
             
             st.dataframe(display_df.style.map(style_rating, subset=['Rating']), use_container_width=True, hide_index=True)
-            
-            col1, col2 = st.columns(2)
-            col1.metric("Total Suggested Investment", f"₹{top_df['Investment (₹)'].sum():,.0f}")
-            col2.metric("Total Capital at Risk", f"₹{(top_df['Shares'] * (top_df['Entry (₹)'] - top_df['Stop (₹)'])).sum():,.0f}")
         else:
-            st.warning("⚠️ No stocks passed the V6.7 Quality criteria today.")
+            st.warning("⚠️ No stocks passed the V6.8 Quality criteria today.")
     else:
         st.warning("No stocks passed the initial technical screen.")
 
@@ -400,7 +419,9 @@ with tab3:
             st.divider()
             st.metric("Current Price", f"₹{row['Price (₹)']:.2f}")
             
-            if '👑' in row['Rating'] or '🟢' in row['Rating']:
+            if row.get('Missing Data', False):
+                st.warning("#### 🎯 Action Required: 🔍 VERIFY EXTERNALLY")
+            elif '👑' in row['Rating'] or '🟢' in row['Rating']:
                 st.success("#### 🎯 Action Required: 🟢 BUY ON DIP (Strong Setup)")
             elif '🟡' in row['Rating']:
                 st.info("#### 🎯 Action Required: 🟢 BUY ON DIP (Emerging Winner)")
@@ -409,12 +430,13 @@ with tab3:
             else:
                 st.error("#### 🎯 Action Required: 🔴 AVOID (Failed Screener)")
             
-            # --- INCORPORATED YOUR UX BUG FIX HERE ---
             st.divider()
             st.markdown("### 🏆 Compounder Tier")
             st.write(f"**Classification:** {row['Rating']}")
 
-            if "👑" in row['Rating']:
+            if "⚠️" in row['Rating']:
+                st.warning("⚠️ **API DATA BLOCKED:** Yahoo Finance refused to provide fundamental data for this stock. The chart looks strong, but you must check Screener.in manually to confirm ROE and Profit Growth.")
+            elif "👑" in row['Rating']:
                 st.success("✅ **MONOPOLY/DUOPOLY:** Structural market leader with pricing power. Hold through 2-3% dips confidently.")
             elif "🟢" in row['Rating']:
                 st.success("✅ **QUALITY COMPOUNDER:** Strong fundamentals + consistent growth.")
@@ -449,15 +471,16 @@ with tab3:
             
             st.divider()
             st.markdown("### 🏢 Fundamentals")
-            st.write(f"**Sector:** {row['Sector']}")
-            
-            profit_display = format_pct(row['Profit↑'])
-            if isinstance(row['Profit↑'], (int, float)) and row['Profit↑'] > 0: profit_display = f"🟢 {profit_display}"
-            elif isinstance(row['Profit↑'], (int, float)) and row['Profit↑'] < 0: profit_display = f"🔴 {profit_display}"
-                
-            st.write(f"**QoQ Profit Growth:** {profit_display}") 
-            st.write(f"**ROE:** {format_pct(row['ROE'])}")
-            st.write(f"**P/E Ratio:** {row['P/E']:.1f}" if pd.notna(row['P/E']) else "**P/E:** N/A")
+            if row.get('Missing Data', False):
+                st.error("Data provider blocked fundamental request. Check externally.")
+            else:
+                st.write(f"**Sector:** {row['Sector']}")
+                profit_display = format_pct(row['Profit↑'])
+                if isinstance(row['Profit↑'], (int, float)) and row['Profit↑'] > 0: profit_display = f"🟢 {profit_display}"
+                elif isinstance(row['Profit↑'], (int, float)) and row['Profit↑'] < 0: profit_display = f"🔴 {profit_display}"
+                st.write(f"**QoQ Profit Growth:** {profit_display}") 
+                st.write(f"**ROE:** {format_pct(row['ROE'])}")
+                st.write(f"**P/E Ratio:** {row['P/E']:.1f}" if pd.notna(row['P/E']) else "**P/E:** N/A")
             
     with colB:
         if row is not None and full_ticker in hist_data['Close'].columns:
@@ -504,7 +527,6 @@ with tab4:
         
         with colA:
             st.markdown("### Context Selection")
-            
             ai_stock_list = sorted([t.replace('.NS', '') for t in all_tickers])
             selected_ai_stock = st.selectbox("Select ANY Stock to Feed AI:", ai_stock_list, key="ai_select")
             ai_full_ticker = next(t for t in all_tickers if t.startswith(selected_ai_stock))
