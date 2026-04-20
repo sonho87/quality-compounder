@@ -10,16 +10,10 @@ import time
 import os
 import google.generativeai as genai
 
-st.set_page_config(page_title="Quality Compounder V6.9", page_icon="👑", layout="wide")
-
-# --- ANTI-BLOCKING BROWSER SPOOFER ---
-yf_session = requests.Session()
-yf_session.headers.update({
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-})
+st.set_page_config(page_title="Quality Compounder V6.10", page_icon="👑", layout="wide")
 
 # --- SIDEBAR CONTROLS ---
-st.sidebar.title("👑 Quality Compounder V6.9")
+st.sidebar.title("👑 Quality Compounder V6.10")
 st.sidebar.subheader("📂 Upload NSE Stock List")
 uploaded_file = st.sidebar.file_uploader("Upload CSV with SYMBOL column", type=['csv'])
 
@@ -90,7 +84,8 @@ def fetch_market_indices(offline=False):
     tickers = ['^NSEI', '^NSEBANK', '^CNXIT', '^CNXMETAL', '^CNXENERGY']
     names = ['NIFTY 50', 'BANK', 'IT', 'METAL', 'ENERGY']
     try:
-        df = yf.download(tickers, period="5d", progress=False, threads=False, session=yf_session)
+        # V6.10: Removed custom session, letting yf handle it
+        df = yf.download(tickers, period="5d", progress=False, threads=False)
         if df.empty: return []
         closes = df['Close'].ffill()
         results = []
@@ -103,7 +98,7 @@ def fetch_market_indices(offline=False):
         return results
     except: return []
 
-# --- BULK PRICE ENGINE (V6.9 STEALTH MODE) ---
+# --- BULK PRICE ENGINE (V6.10 STEALTH MODE) ---
 @st.cache_data(ttl=600)
 def fetch_bulk_price_data(tickers, offline=False):
     if offline:
@@ -111,12 +106,12 @@ def fetch_bulk_price_data(tickers, offline=False):
         if os.path.exists("v6_local_test_data.pkl"):
             return pd.read_pickle("v6_local_test_data.pkl")
         else:
-            df = yf.download(tickers, period="3y", progress=False, threads=True, session=yf_session)
+            df = yf.download(tickers, period="3y", progress=False, threads=True)
             df.to_pickle("v6_local_test_data.pkl")
             return df
 
     all_tickers = list(tickers)[:500] 
-    chunk_size = 50 # Reduced from 100 to avoid rate limits
+    chunk_size = 50 
     chunks = [all_tickers[i:i + chunk_size] for i in range(0, len(all_tickers), chunk_size)]
     combined_data = None
     
@@ -126,12 +121,12 @@ def fetch_bulk_price_data(tickers, offline=False):
     try:
         for i, chunk in enumerate(chunks):
             status_text.text(f"📥 Downloading 3-Year Price Batch {i+1} of {len(chunks)}...")
-            # threads=False forces sequential downloading to prevent IP blocking
-            temp_df = yf.download(chunk, period="3y", progress=False, threads=False, session=yf_session)
+            # V6.10: threads=False for safety, no custom session
+            temp_df = yf.download(chunk, period="3y", progress=False, threads=False)
             if temp_df is not None and not temp_df.empty:
                 if combined_data is None: combined_data = temp_df
                 else: combined_data = pd.concat([combined_data, temp_df], axis=1)
-            time.sleep(2) # Polite delay between batches
+            time.sleep(2) 
             progress_bar.progress((i + 1) / len(chunks))
             
         status_text.empty()
@@ -144,7 +139,6 @@ def fetch_bulk_price_data(tickers, offline=False):
         combined_data = combined_data.loc[:, ~combined_data.columns.duplicated()]
         return combined_data.ffill() 
     except Exception as e:
-        # Expose the actual network error instead of hiding it
         st.error(f"⚠️ Network Error during download: {str(e)}")
         return None
 
@@ -226,7 +220,8 @@ def evaluate_single_stock(full_ticker, _hist_data, offline, capital, risk_pct, m
         profit_growth, consistent_growth, roe, pe, sector = 0.18, True, 0.22, 45.0, "Technology"
     else:
         try:
-            tkr = yf.Ticker(full_ticker, session=yf_session)
+            # V6.10: Removed custom session
+            tkr = yf.Ticker(full_ticker)
             info = tkr.info
             if not info or len(info) < 5:
                 missing_fundamentals = True
@@ -335,7 +330,7 @@ if hist_data is None or 'Close' not in hist_data.columns:
     st.error("🚨 Connection failed. Please check the network error details above, clear cache, and try again.")
     st.stop()
 
-with st.spinner("🛡️ Running V6.9 Compounder Funnel..."):
+with st.spinner("🛡️ Running V6.10 Compounder Funnel..."):
     master_df = build_v6_screener(all_tickers, offline=offline_mode, slider_6m=min_6m_return/100, slider_1y=min_1y_return/100)
 
 # --- UI TABS ---
@@ -378,7 +373,7 @@ with tab1:
             
             st.dataframe(display_df.style.map(style_rating, subset=['Rating']), use_container_width=True, hide_index=True)
         else:
-            st.warning("⚠️ No stocks passed the V6.9 Quality criteria today.")
+            st.warning("⚠️ No stocks passed the V6.10 Quality criteria today.")
     else:
         st.warning("No stocks passed the initial technical screen.")
 
