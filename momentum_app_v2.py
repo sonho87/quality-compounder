@@ -10,10 +10,10 @@ import time
 import os
 import google.generativeai as genai
 
-st.set_page_config(page_title="Quality Compounder V6.6", page_icon="👑", layout="wide")
+st.set_page_config(page_title="Quality Compounder V6.7", page_icon="👑", layout="wide")
 
 # --- SIDEBAR CONTROLS ---
-st.sidebar.title("👑 Quality Compounder V6.6")
+st.sidebar.title("👑 Quality Compounder V6.7")
 st.sidebar.subheader("📂 Upload NSE Stock List")
 uploaded_file = st.sidebar.file_uploader("Upload CSV with SYMBOL column", type=['csv'])
 
@@ -195,7 +195,7 @@ def evaluate_single_stock(full_ticker, _hist_data, offline, capital, risk_pct, m
     close = _hist_data['Close'][full_ticker].dropna()
     vol = _hist_data['Volume'][full_ticker].dropna() if 'Volume' in _hist_data.columns else pd.Series(dtype='float64')
     
-    if len(close) < 20: return None # Un-analyzable
+    if len(close) < 20: return None 
     
     avg_vol_lakhs = (vol.tail(20).mean() / 100000)
     current_price = close.iloc[-1]
@@ -279,12 +279,9 @@ def build_v6_screener(tickers_list, offline=False, slider_6m=0.30, slider_1y=0.4
     
     for i, ticker in enumerate(survivors):
         status_text.text(f"🔍 Validating Quality Fundamentals for {i+1}/{len(survivors)}...")
-        
-        # Re-use our new powerful evaluator to keep code DRY
         stock_data = evaluate_single_stock(ticker, hist_data, offline, portfolio_capital, risk_per_trade_pct, max_position_cap_pct)
         if stock_data and stock_data["Structural"] == "✓":
             results.append(stock_data)
-            
         progress_bar.progress((i + 1) / len(survivors))
         
     status_text.empty()
@@ -316,7 +313,7 @@ if hist_data is None or 'Close' not in hist_data.columns:
     st.error("🚨 Connection failed. Clear cache.")
     st.stop()
 
-with st.spinner("🛡️ Running V6.6 Compounder Funnel..."):
+with st.spinner("🛡️ Running V6.7 Compounder Funnel..."):
     master_df = build_v6_screener(all_tickers, offline=offline_mode, slider_6m=min_6m_return/100, slider_1y=min_1y_return/100)
 
 # --- UI TABS ---
@@ -362,7 +359,7 @@ with tab1:
             col1.metric("Total Suggested Investment", f"₹{top_df['Investment (₹)'].sum():,.0f}")
             col2.metric("Total Capital at Risk", f"₹{(top_df['Shares'] * (top_df['Entry (₹)'] - top_df['Stop (₹)'])).sum():,.0f}")
         else:
-            st.warning("⚠️ No stocks passed the V6.6 Quality criteria today.")
+            st.warning("⚠️ No stocks passed the V6.7 Quality criteria today.")
     else:
         st.warning("No stocks passed the initial technical screen.")
 
@@ -386,7 +383,6 @@ with tab3:
     st.subheader("🔍 Universal Deep Dive Analysis")
     colA, colB = st.columns([1, 2.5])
     with colA:
-        # NEW: Allows searching through ALL 500 uploaded stocks!
         full_stock_list = sorted([t.replace('.NS', '') for t in all_tickers])
         selected = st.selectbox("Search ANY Uploaded Stock (Type to search):", full_stock_list, key="deepdive_search")
         full_ticker = next(t for t in all_tickers if t.startswith(selected))
@@ -413,12 +409,33 @@ with tab3:
             else:
                 st.error("#### 🎯 Action Required: 🔴 AVOID (Failed Screener)")
             
+            # --- INCORPORATED YOUR UX BUG FIX HERE ---
             st.divider()
             st.markdown("### 🏆 Compounder Tier")
             st.write(f"**Classification:** {row['Rating']}")
-            
-            if "MONOPOLY" not in row['Rating']:
-                st.caption("💡 *To reach '👑 MONOPOLY' status, this stock needs: 3-Year Return > 150%, ROE > 15%, and Consistent Profit Growth.*")
+
+            if "👑" in row['Rating']:
+                st.success("✅ **MONOPOLY/DUOPOLY:** Structural market leader with pricing power. Hold through 2-3% dips confidently.")
+            elif "🟢" in row['Rating']:
+                st.success("✅ **QUALITY COMPOUNDER:** Strong fundamentals + consistent growth.")
+                st.caption("💡 *To reach '👑 MONOPOLY': Need 3-Year Return > 150% + ROE > 15%*")
+            elif "🟡" in row['Rating']:
+                st.info("⚡ **EMERGING WINNER:** Building momentum with growing earnings.")
+                st.caption("💡 *To reach '👑 MONOPOLY': Need 3-Year Return > 150% + ROE > 15%*")
+            elif "🔵" in row['Rating']:
+                st.warning("⚠️ **MOMENTUM PLAY:** Price strength but fundamentals unconfirmed.")
+                st.caption("💡 *To upgrade to 🟢 QUALITY: Need consistent profit growth (2 of 3 quarters positive)*")
+            elif "CHOPPY" in row['Rating']:
+                st.error("❌ **CHOPPY TREND - AVOID**")
+                st.write("**Why it failed:**")
+                st.write("• Quarterly highs NOT rising consistently, OR")
+                st.write("• Drawdown exceeded 25%")
+                st.caption(f"Details: {row['Structure Note']}")
+            elif "WEAK" in row['Rating']:
+                st.error("❌ **WEAK RETURNS - AVOID**")
+                st.write("**Why it failed:**")
+                st.write("• 6-Month return < 30%, OR")
+                st.write("• 1-Year return < 40%")
             
             st.divider()
             st.markdown("### 📝 Strict Execution Plan")
@@ -441,7 +458,6 @@ with tab3:
             st.write(f"**QoQ Profit Growth:** {profit_display}") 
             st.write(f"**ROE:** {format_pct(row['ROE'])}")
             st.write(f"**P/E Ratio:** {row['P/E']:.1f}" if pd.notna(row['P/E']) else "**P/E:** N/A")
-            st.caption(f"**Structure Note:** {row['Structure Note']}")
             
     with colB:
         if row is not None and full_ticker in hist_data['Close'].columns:
@@ -489,7 +505,6 @@ with tab4:
         with colA:
             st.markdown("### Context Selection")
             
-            # NEW: Let the AI analyze ANY stock from the file
             ai_stock_list = sorted([t.replace('.NS', '') for t in all_tickers])
             selected_ai_stock = st.selectbox("Select ANY Stock to Feed AI:", ai_stock_list, key="ai_select")
             ai_full_ticker = next(t for t in all_tickers if t.startswith(selected_ai_stock))
