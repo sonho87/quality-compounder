@@ -10,17 +10,16 @@ import time
 import os
 import google.generativeai as genai
 
-st.set_page_config(page_title="Quality Compounder V6.8", page_icon="👑", layout="wide")
+st.set_page_config(page_title="Quality Compounder V6.9", page_icon="👑", layout="wide")
 
 # --- ANTI-BLOCKING BROWSER SPOOFER ---
-# This tricks Yahoo into thinking the app is a real human browser
 yf_session = requests.Session()
 yf_session.headers.update({
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 })
 
 # --- SIDEBAR CONTROLS ---
-st.sidebar.title("👑 Quality Compounder V6.8")
+st.sidebar.title("👑 Quality Compounder V6.9")
 st.sidebar.subheader("📂 Upload NSE Stock List")
 uploaded_file = st.sidebar.file_uploader("Upload CSV with SYMBOL column", type=['csv'])
 
@@ -104,7 +103,7 @@ def fetch_market_indices(offline=False):
         return results
     except: return []
 
-# --- BULK PRICE ENGINE ---
+# --- BULK PRICE ENGINE (V6.9 STEALTH MODE) ---
 @st.cache_data(ttl=600)
 def fetch_bulk_price_data(tickers, offline=False):
     if offline:
@@ -117,7 +116,7 @@ def fetch_bulk_price_data(tickers, offline=False):
             return df
 
     all_tickers = list(tickers)[:500] 
-    chunk_size = 100
+    chunk_size = 50 # Reduced from 100 to avoid rate limits
     chunks = [all_tickers[i:i + chunk_size] for i in range(0, len(all_tickers), chunk_size)]
     combined_data = None
     
@@ -127,11 +126,12 @@ def fetch_bulk_price_data(tickers, offline=False):
     try:
         for i, chunk in enumerate(chunks):
             status_text.text(f"📥 Downloading 3-Year Price Batch {i+1} of {len(chunks)}...")
-            temp_df = yf.download(chunk, period="3y", progress=False, threads=True, session=yf_session)
+            # threads=False forces sequential downloading to prevent IP blocking
+            temp_df = yf.download(chunk, period="3y", progress=False, threads=False, session=yf_session)
             if temp_df is not None and not temp_df.empty:
                 if combined_data is None: combined_data = temp_df
                 else: combined_data = pd.concat([combined_data, temp_df], axis=1)
-            time.sleep(1) 
+            time.sleep(2) # Polite delay between batches
             progress_bar.progress((i + 1) / len(chunks))
             
         status_text.empty()
@@ -143,7 +143,10 @@ def fetch_bulk_price_data(tickers, offline=False):
         combined_data.index = combined_data.index.normalize()
         combined_data = combined_data.loc[:, ~combined_data.columns.duplicated()]
         return combined_data.ffill() 
-    except Exception as e: return None
+    except Exception as e:
+        # Expose the actual network error instead of hiding it
+        st.error(f"⚠️ Network Error during download: {str(e)}")
+        return None
 
 # --- V6 QUALITY COMPOUNDER LOGIC ---
 def detect_structural_strength(close_series):
@@ -223,11 +226,8 @@ def evaluate_single_stock(full_ticker, _hist_data, offline, capital, risk_pct, m
         profit_growth, consistent_growth, roe, pe, sector = 0.18, True, 0.22, 45.0, "Technology"
     else:
         try:
-            # Using the spoofed session to bypass Yahoo blocks
             tkr = yf.Ticker(full_ticker, session=yf_session)
             info = tkr.info
-            
-            # If info is completely empty, Yahoo blocked us
             if not info or len(info) < 5:
                 missing_fundamentals = True
             else:
@@ -332,10 +332,10 @@ with st.spinner("📥 Fetching 3-year bulk price data..."):
     hist_data = fetch_bulk_price_data(all_tickers, offline=offline_mode)
     
 if hist_data is None or 'Close' not in hist_data.columns:
-    st.error("🚨 Connection failed. Clear cache.")
+    st.error("🚨 Connection failed. Please check the network error details above, clear cache, and try again.")
     st.stop()
 
-with st.spinner("🛡️ Running V6.8 Compounder Funnel..."):
+with st.spinner("🛡️ Running V6.9 Compounder Funnel..."):
     master_df = build_v6_screener(all_tickers, offline=offline_mode, slider_6m=min_6m_return/100, slider_1y=min_1y_return/100)
 
 # --- UI TABS ---
@@ -378,7 +378,7 @@ with tab1:
             
             st.dataframe(display_df.style.map(style_rating, subset=['Rating']), use_container_width=True, hide_index=True)
         else:
-            st.warning("⚠️ No stocks passed the V6.8 Quality criteria today.")
+            st.warning("⚠️ No stocks passed the V6.9 Quality criteria today.")
     else:
         st.warning("No stocks passed the initial technical screen.")
 
@@ -428,7 +428,7 @@ with tab3:
             elif '🔵' in row['Rating']:
                 st.warning("#### 🎯 Action Required: 🟡 WATCH (No Fundamentals)")
             else:
-                st.error("#### 🎯 Action Required: 🔴 AVOID (Failed Screener)")
+                st.error("#### 🎯 Action Required: 🔴 AVOID")
             
             st.divider()
             st.markdown("### 🏆 Compounder Tier")
