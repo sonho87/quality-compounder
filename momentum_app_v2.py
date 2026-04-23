@@ -10,7 +10,7 @@ import time
 import os
 import google.generativeai as genai
 
-st.set_page_config(page_title="Quant Terminal: V4 Prod", page_icon="⚡", layout="wide")
+st.set_page_config(page_title="Quant Terminal: V4.1 Prod", page_icon="⚡", layout="wide")
 
 # --- ANTI-BLOCKING BROWSER SPOOFER ---
 yf_session = requests.Session()
@@ -19,7 +19,7 @@ yf_session.headers.update({
 })
 
 # --- SIDEBAR CONTROLS ---
-st.sidebar.title("⚡ V4 Production Terminal")
+st.sidebar.title("⚡ V4.1 Production Terminal")
 st.sidebar.subheader("📂 Upload NSE Stock List")
 uploaded_file = st.sidebar.file_uploader("Upload CSV with SYMBOL column", type=['csv'])
 
@@ -184,7 +184,6 @@ def safe_get_fundamentals(full_ticker, offline=False):
         if data_points_found > 1: fundamentals["missing"] = False
         
     except Exception as e:
-        # Silently catch the error, the UI will handle the missing flag
         pass
         
     return fundamentals
@@ -296,8 +295,8 @@ def evaluate_single_stock(full_ticker, _hist_data, offline, capital, min_trade_v
     stop_pct = max(0.03, min(0.06, raw_stop_pct)) 
     
     stop_price = current_price * (1 - stop_pct)
-    target_1 = current_price + (1.5 * current_atr) # V4: Volatility-based target 1
-    target_2 = current_price + (3.0 * current_atr) # V4: Volatility-based target 2
+    target_1 = current_price + (1.5 * current_atr)
+    target_2 = current_price + (3.0 * current_atr)
     
     shares = int(capital / current_price) if current_price > 0 else 0
     investment = shares * current_price
@@ -398,7 +397,8 @@ with tab1:
             display_df['Target 1 (₹)'] = display_df['Target 1 (₹)'].apply(lambda x: f"₹{x:.2f}")
             display_df['Target 2 (₹)'] = display_df['Target 2 (₹)'].apply(lambda x: f"₹{x:.2f}")
             
-            st.dataframe(display_df.style.map(style_rating, subset=['Rating']), use_container_width=True, hide_index=True)
+            # FIXED: width='stretch'
+            st.dataframe(display_df.style.map(style_rating, subset=['Rating']), width='stretch', hide_index=True)
         else:
             st.warning("⚠️ No stocks passed the strict V4 Swing parameters today.")
     else:
@@ -415,7 +415,8 @@ with tab2:
         display_df['Price (₹)'] = display_df['Price (₹)'].apply(lambda x: f"₹{x:.2f}")
         display_df['RSI'] = display_df['RSI'].apply(lambda x: f"{x:.1f}")
         
-        st.dataframe(display_df.style.map(style_rating, subset=['Rating']), use_container_width=True, hide_index=True)
+        # FIXED: width='stretch'
+        st.dataframe(display_df.style.map(style_rating, subset=['Rating']), width='stretch', hide_index=True)
 
 with tab3:
     st.subheader("🔍 Universal Deep Dive Analysis")
@@ -444,11 +445,12 @@ with tab3:
                 st.caption(f"**Failed Because:** {row['Fail_Reason']}")
             
             st.divider()
-            # --- V4 TRANSPARENCY UI ---
             st.markdown("### 🚦 Signal Integrity")
             col1, col2 = st.columns(2)
             col1.write("**Technical Pass:** ✅" if "Not at" not in row['Fail_Reason'] and "No Vol" not in row['Fail_Reason'] and "RSI" not in row['Fail_Reason'] else "**Technical Pass:** ❌")
-            col2.write("**Fundamental Pass:** ✅" if score >= 4 else "**Fundamental Pass:** ❌")
+            
+            # FIXED: Dictionary key 'Score' instead of floating variable 'score'
+            col2.write("**Fundamental Pass:** ✅" if row['Score'] >= 4 else "**Fundamental Pass:** ❌")
             
             if row['Missing_Data']:
                 st.warning(f"⚠️ **DATA BLOCKED ({row['Data_Quality']} Integrity):** Yahoo Finance refused fundamental data. Verify ROE externally on Screener.in.")
@@ -503,7 +505,8 @@ with tab3:
                 fig.add_hline(y=row['Target 2 (₹)'], line_dash="dash", line_color="darkgreen", annotation_text="T2 (+3.0 ATR)")
                 fig.add_hline(y=row['Stop (₹)'], line_dash="dash", line_color="red", annotation_text="Stop Loss")
                 
-                st.plotly_chart(fig, use_container_width=True)
+                # FIXED: width='stretch'
+                st.plotly_chart(fig, width='stretch')
                 
         if row is not None:
             st.divider()
