@@ -10,10 +10,16 @@ import time
 import os
 import google.generativeai as genai
 
-st.set_page_config(page_title="Quality Compounder V6.10", page_icon="👑", layout="wide")
+st.set_page_config(page_title="Quant Terminal: V3 Swing", page_icon="⚡", layout="wide")
+
+# --- ANTI-BLOCKING BROWSER SPOOFER ---
+yf_session = requests.Session()
+yf_session.headers.update({
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+})
 
 # --- SIDEBAR CONTROLS ---
-st.sidebar.title("👑 Quality Compounder V6.10")
+st.sidebar.title("⚡ V3 Swing Terminal")
 st.sidebar.subheader("📂 Upload NSE Stock List")
 uploaded_file = st.sidebar.file_uploader("Upload CSV with SYMBOL column", type=['csv'])
 
@@ -34,20 +40,16 @@ gemini_api_key = st.sidebar.text_input("Enter Gemini API Key", type="password")
 if gemini_api_key:
     genai.configure(api_key=gemini_api_key)
 
-# --- RISK MANAGEMENT ---
+# --- RISK MANAGEMENT (V3 EXACT PARAMETERS) ---
 st.sidebar.divider()
-st.sidebar.subheader("🛡️ Risk Management")
-portfolio_capital = st.sidebar.number_input("Total Portfolio Capital (₹)", min_value=10000, value=500000, step=50000)
-risk_per_trade_pct = st.sidebar.slider("Max Risk per Trade (%)", 0.5, 5.0, 2.0, 0.5) / 100
-max_position_cap_pct = st.sidebar.slider("Max Position Size (% of Port)", 5.0, 30.0, 20.0, 5.0) / 100
+st.sidebar.subheader("🛡️ Swing Risk Limits")
+portfolio_capital = st.sidebar.number_input("Capital Per Trade (₹)", min_value=10000, value=33000, step=1000)
+max_position_cap_pct = 0.33 # Hardcoded 33% max per stock rule
 
-# --- COMPOUNDER FILTERS ---
 st.sidebar.divider()
-st.sidebar.subheader("🎛️ Compounder Filters")
-min_6m_return = st.sidebar.slider("Min 6-Month Return (%)", 15, 100, 30)
-min_1y_return = st.sidebar.slider("Min 1-Year Return (%)", 20, 150, 40)
-min_vol_lakhs = st.sidebar.number_input("Min Daily Volume (Lakhs)", 1, 200, 25)
-allow_recent_dips = st.sidebar.checkbox("Allow Recent 2-5% Dips", value=True)
+st.sidebar.subheader("🎛️ V3 Momentum Filters")
+min_trade_val_lakhs = st.sidebar.number_input("Min Daily Traded Val (Lakhs)", value=50)
+st.sidebar.caption("Filters out thin stocks prone to gapping.")
 
 # --- LIVE GOOGLE NEWS ENGINE ---
 @st.cache_data(ttl=1800)
@@ -84,7 +86,6 @@ def fetch_market_indices(offline=False):
     tickers = ['^NSEI', '^NSEBANK', '^CNXIT', '^CNXMETAL', '^CNXENERGY']
     names = ['NIFTY 50', 'BANK', 'IT', 'METAL', 'ENERGY']
     try:
-        # V6.10: Removed custom session, letting yf handle it
         df = yf.download(tickers, period="5d", progress=False, threads=False)
         if df.empty: return []
         closes = df['Close'].ffill()
@@ -98,7 +99,7 @@ def fetch_market_indices(offline=False):
         return results
     except: return []
 
-# --- BULK PRICE ENGINE (V6.10 STEALTH MODE) ---
+# --- BULK PRICE ENGINE ---
 @st.cache_data(ttl=600)
 def fetch_bulk_price_data(tickers, offline=False):
     if offline:
@@ -120,8 +121,7 @@ def fetch_bulk_price_data(tickers, offline=False):
     
     try:
         for i, chunk in enumerate(chunks):
-            status_text.text(f"📥 Downloading 3-Year Price Batch {i+1} of {len(chunks)}...")
-            # V6.10: threads=False for safety, no custom session
+            status_text.text(f"📥 Downloading Price Batch {i+1} of {len(chunks)}...")
             temp_df = yf.download(chunk, period="3y", progress=False, threads=False)
             if temp_df is not None and not temp_df.empty:
                 if combined_data is None: combined_data = temp_df
@@ -142,22 +142,34 @@ def fetch_bulk_price_data(tickers, offline=False):
         st.error(f"⚠️ Network Error during download: {str(e)}")
         return None
 
-# --- V6 QUALITY COMPOUNDER LOGIC ---
+# --- INDICATOR MATH ---
+def calc_rsi(series, period=14):
+    delta = series.diff()
+    gain = (delta.where(delta > 0, 0)).fillna(0)
+    loss = (-delta.where(delta < 0, 0)).fillna(0)
+    avg_gain = gain.rolling(window=period, min_periods=period).mean()
+    avg_loss = loss.rolling(window=period, min_periods=period).mean()
+    rs = avg_gain / avg_loss
+    return 100 - (100 / (1 + rs))
+
+def calc_atr(df_ticker, period=14):
+    tr = np.maximum(df_ticker['High'] - df_ticker['Low'],
+         np.maximum(abs(df_ticker['High'] - df_ticker['Close'].shift()),
+                    abs(df_ticker['Low'] - df_ticker['Close'].shift())))
+    return tr.rolling(period).mean()
+
 def detect_structural_strength(close_series):
     if len(close_series) < 250:
         return False, "Insufficient data (< 1 Year)"
-    
     one_year = close_series.tail(250)
     q1 = one_year.iloc[:62].max()
     q2 = one_year.iloc[62:125].max()
     q3 = one_year.iloc[125:187].max()
     q4 = one_year.iloc[187:].max()
     quarters_rising = (q2 >= q1 and q3 >= q2 and q4 >= q3)
-    
     rolling_max = one_year.expanding().max()
     drawdown = (one_year / rolling_max) - 1
     max_dd = drawdown.min()
-    
     limited_drawdown = max_dd > -0.25  
     is_structural = quarters_rising and limited_drawdown
     
@@ -179,39 +191,40 @@ def classify_compounder(ret_6m, ret_1y, ret_3y, structural, consistent_growth, r
     if not structural: return "🔴 CHOPPY", 0
     return "🔴 WEAK RETURNS", 0
 
-def calculate_position_size(capital, entry_price, stop_price, risk_pct, max_cap_pct):
-    if not stop_price or entry_price <= stop_price: return 0, 0
-    risk_per_share = entry_price - stop_price
-    max_capital_risk = capital * risk_pct
-    shares_allowed = int(max_capital_risk / risk_per_share)
-    total_investment = shares_allowed * entry_price
-    max_position_value = capital * max_cap_pct
-    if total_investment > max_position_value:
-        shares_allowed = int(max_position_value / entry_price)
-        total_investment = shares_allowed * entry_price
-    return shares_allowed, total_investment
-
-# --- ON-DEMAND SINGLE STOCK EVALUATOR ---
+# --- ON-DEMAND SINGLE STOCK EVALUATOR (V3 UPDATE) ---
 @st.cache_data(show_spinner=False, ttl=600)
-def evaluate_single_stock(full_ticker, _hist_data, offline, capital, risk_pct, max_cap_pct):
+def evaluate_single_stock(full_ticker, _hist_data, offline, capital, min_trade_val):
     ticker_clean = full_ticker.replace('.NS', '')
     if _hist_data is None or 'Close' not in _hist_data.columns or full_ticker not in _hist_data['Close'].columns:
         return None
         
-    close = _hist_data['Close'][full_ticker].dropna()
-    vol = _hist_data['Volume'][full_ticker].dropna() if 'Volume' in _hist_data.columns else pd.Series(dtype='float64')
+    df_ticker = pd.DataFrame({
+        'Close': _hist_data['Close'][full_ticker],
+        'High': _hist_data['High'][full_ticker] if 'High' in _hist_data.columns else _hist_data['Close'][full_ticker],
+        'Low': _hist_data['Low'][full_ticker] if 'Low' in _hist_data.columns else _hist_data['Close'][full_ticker],
+        'Volume': _hist_data['Volume'][full_ticker] if 'Volume' in _hist_data.columns else 0
+    }).dropna()
     
-    if len(close) < 20: return None 
+    if len(df_ticker) < 252: return None 
     
-    avg_vol_lakhs = (vol.tail(20).mean() / 100000)
-    current_price = close.iloc[-1]
+    current_price = df_ticker['Close'].iloc[-1]
+    avg_vol_20 = df_ticker['Volume'].tail(20).mean()
+    traded_val_lakhs = (avg_vol_20 * current_price) / 100000
     
-    ret_1m = (close.iloc[-1] / close.iloc[-22] - 1) if len(close) >= 22 else None
-    ret_6m = (close.iloc[-1] / close.iloc[-130] - 1) if len(close) >= 130 else None
-    ret_1y = (close.iloc[-1] / close.iloc[-250] - 1) if len(close) >= 250 else None
-    ret_3y = (close.iloc[-1] / close.iloc[0] - 1) if len(close) >= 700 else None
+    # Technical Indicators
+    high52 = df_ticker['High'].tail(252).max()
+    rsi = calc_rsi(df_ticker['Close'], 14)
+    current_rsi = rsi.iloc[-1]
+    atr = calc_atr(df_ticker, 14)
+    current_atr = atr.iloc[-1]
     
-    structural, structure_reason = detect_structural_strength(close)
+    # Quality Scoring logic
+    ret_1m = (current_price / df_ticker['Close'].iloc[-22] - 1)
+    ret_6m = (current_price / df_ticker['Close'].iloc[-130] - 1) 
+    ret_1y = (current_price / df_ticker['Close'].iloc[-250] - 1) 
+    ret_3y = (current_price / df_ticker['Close'].iloc[0] - 1) if len(df_ticker) >= 700 else None
+    
+    structural, structure_reason = detect_structural_strength(df_ticker['Close'])
     
     profit_growth, consistent_growth, roe, pe, sector, mcap = None, False, None, None, "N/A", None
     missing_fundamentals = False
@@ -220,17 +233,14 @@ def evaluate_single_stock(full_ticker, _hist_data, offline, capital, risk_pct, m
         profit_growth, consistent_growth, roe, pe, sector = 0.18, True, 0.22, 45.0, "Technology"
     else:
         try:
-            # V6.10: Removed custom session
             tkr = yf.Ticker(full_ticker)
             info = tkr.info
-            if not info or len(info) < 5:
-                missing_fundamentals = True
+            if not info or len(info) < 5: missing_fundamentals = True
             else:
                 sector = info.get('sector', 'N/A')
                 mcap = info.get('marketCap')
                 pe = info.get('trailingPE')
                 roe = info.get('returnOnEquity')
-                
                 q_fin = tkr.quarterly_financials
                 if q_fin is not None and not q_fin.empty and 'Net Income' in q_fin.index:
                     ni = q_fin.loc['Net Income'].dropna()
@@ -239,71 +249,72 @@ def evaluate_single_stock(full_ticker, _hist_data, offline, capital, risk_pct, m
                         if len(growth_rates) >= 2:
                             profit_growth = growth_rates[0] 
                             consistent_growth = sum(1 for g in growth_rates if g > 0) >= 2
-                else:
-                    missing_fundamentals = True
-        except: 
-            missing_fundamentals = True
+                else: missing_fundamentals = True
+        except: missing_fundamentals = True
 
     rating, score = classify_compounder(ret_6m, ret_1y, ret_3y, structural, consistent_growth, roe, missing_fundamentals)
     
-    entry_price = current_price * 0.98 
-    stop_price = entry_price * 0.85 
-    target_price = entry_price * 1.30 if score == 5 else entry_price * 1.20
-    shares, investment = calculate_position_size(capital, entry_price, stop_price, risk_pct, max_cap_pct)
+    # V3 EXACT PARAMETER EVALUATION
+    is_breakout = current_price >= (high52 * 0.98) # Within 2% of 52w high is considered breakout zone
+    is_vol_surge = df_ticker['Volume'].iloc[-1] > (1.5 * avg_vol_20)
+    is_rsi_valid = 50 <= current_rsi <= 72
+    is_quality = score >= 4 # Matches Quality or Monopoly (35/50 proxy)
+    
+    v3_signal = False
+    fail_reason = []
+    
+    if traded_val_lakhs < min_trade_val: fail_reason.append(f"Low Traded Val ({traded_val_lakhs:.1f}L)")
+    if not is_breakout: fail_reason.append("Not at 52w High")
+    if not is_vol_surge: fail_reason.append("No Vol Surge")
+    if not is_rsi_valid: fail_reason.append(f"RSI {current_rsi:.1f} outside 50-72")
+    if not is_quality: fail_reason.append("Failed Quality Tier")
+    
+    if not fail_reason: v3_signal = True
+    
+    # V3 STOP & TARGET MATH
+    raw_stop_dist = 1.5 * current_atr
+    raw_stop_pct = raw_stop_dist / current_price
+    stop_pct = max(0.03, min(0.06, raw_stop_pct)) # Clamp between 3% and 6%
+    
+    stop_price = current_price * (1 - stop_pct)
+    target_1 = current_price * 1.04
+    target_2 = current_price * 1.07
+    
+    # Position Sizing
+    shares = int(capital / current_price) if current_price > 0 else 0
+    investment = shares * current_price
     
     return {
         "Ticker": ticker_clean, "Full_Ticker": full_ticker,
-        "Rating": rating, "Score": score,
-        "Price (₹)": current_price, "Vol (L)": avg_vol_lakhs,
+        "Rating": rating, "Score": score, "V3_Signal": v3_signal, "Fail_Reason": " | ".join(fail_reason),
+        "Price (₹)": current_price, "Traded_Val (L)": traded_val_lakhs, "RSI": current_rsi,
         "Structural": "✓" if structural else "✗", "Structure Note": structure_reason,
         "Growth": "✓" if consistent_growth else "?", "Profit↑": profit_growth, "ROE": roe, "P/E": pe,
         "Missing Data": missing_fundamentals,
-        "Entry (₹)": entry_price, "Target (₹)": target_price, "Stop (₹)": stop_price, 
+        "Target 1 (₹)": target_1, "Target 2 (₹)": target_2, "Stop (₹)": stop_price, "Stop Pct": stop_pct,
         "Shares": shares, "Investment (₹)": investment,
-        "1-Month": ret_1m, "6-Month": ret_6m, "1-Year": ret_1y, "3-Year": ret_3y,
+        "1-Month": ret_1m, "6-Month": ret_6m, "1-Year": ret_1y,
         "Sector": sector, "M.Cap (Cr)": (mcap / 10000000) if mcap else None
     }
 
 # --- SCRENER BUILDER ---
 @st.cache_data(ttl=60)
-def build_v6_screener(tickers_list, offline=False, slider_6m=0.30, slider_1y=0.40):
+def build_v7_screener(tickers_list, offline=False, capital=33000, min_val=50):
     survivors = []
     processing_list = tickers_list[:15] if offline else tickers_list
     
-    for ticker in processing_list:
-        if ticker not in hist_data['Close'].columns: continue
-        close = hist_data['Close'][ticker].dropna()
-        vol = hist_data['Volume'][ticker].dropna() if 'Volume' in hist_data.columns else pd.Series(dtype='float64')
-        if len(close) < 250: continue
-        
-        avg_vol_lakhs = (vol.tail(20).mean() / 100000) if len(vol) >= 20 else 0
-        if avg_vol_lakhs < min_vol_lakhs and not offline: continue
-        
-        ret_1m = (close.iloc[-1] / close.iloc[-22] - 1) if len(close) >= 22 else None
-        ret_6m = (close.iloc[-1] / close.iloc[-130] - 1) if len(close) >= 130 else None
-        ret_1y = (close.iloc[-1] / close.iloc[-250] - 1) if len(close) >= 250 else None
-        
-        if allow_recent_dips and pd.notna(ret_1m) and ret_1m < 0:
-            if ret_1m < -0.10: continue 
-            if not (pd.notna(ret_6m) and ret_6m > 0.25): continue
-            
-        if pd.notna(ret_6m) and ret_6m >= slider_6m and pd.notna(ret_1y) and ret_1y >= slider_1y:
-            survivors.append(ticker)
-
-    results = []
     progress_bar = st.progress(0)
     status_text = st.empty()
     
-    for i, ticker in enumerate(survivors):
-        status_text.text(f"🔍 Validating Quality Fundamentals for {i+1}/{len(survivors)}...")
-        stock_data = evaluate_single_stock(ticker, hist_data, offline, portfolio_capital, risk_per_trade_pct, max_position_cap_pct)
-        if stock_data and stock_data["Structural"] == "✓":
-            results.append(stock_data)
-        progress_bar.progress((i + 1) / len(survivors))
+    for i, ticker in enumerate(processing_list):
+        status_text.text(f"🔍 Validating V3 Exact Parameters for {i+1}/{len(processing_list)}...")
+        stock_data = evaluate_single_stock(ticker, hist_data, offline, capital, min_val)
+        if stock_data: survivors.append(stock_data)
+        progress_bar.progress((i + 1) / len(processing_list))
         
     status_text.empty()
     progress_bar.empty()
-    return pd.DataFrame(results)
+    return pd.DataFrame(survivors)
 
 # --- APP EXECUTION ---
 if uploaded_file is not None:
@@ -330,11 +341,11 @@ if hist_data is None or 'Close' not in hist_data.columns:
     st.error("🚨 Connection failed. Please check the network error details above, clear cache, and try again.")
     st.stop()
 
-with st.spinner("🛡️ Running V6.10 Compounder Funnel..."):
-    master_df = build_v6_screener(all_tickers, offline=offline_mode, slider_6m=min_6m_return/100, slider_1y=min_1y_return/100)
+with st.spinner("🛡️ Running V3 Momentum Swing Funnel..."):
+    master_df = build_v7_screener(all_tickers, offline=offline_mode, capital=portfolio_capital, min_val=min_trade_val_lakhs)
 
 # --- UI TABS ---
-tab1, tab2, tab3, tab4 = st.tabs(["👑 Quality Compounders", "📊 Full Screener", "🔍 Deep Dive", "🤖 AI Co-Pilot"])
+tab1, tab2, tab3, tab4 = st.tabs(["⚡ V3 Action Signals", "📊 Full Screener", "🔍 Deep Dive", "🤖 AI Co-Pilot"])
 
 def format_pct(val): return f"{val:.1%}" if pd.notna(val) else "N/A"
 def style_rating(val):
@@ -355,41 +366,39 @@ with tab1:
             cols[i].metric(idx['Name'], f"₹{idx['Price']:,.0f}", f"{idx['Change']:.2%}")
     
     st.divider()
-    st.subheader("👑 Top Quality Compounders")
+    st.subheader("⚡ V3 Swing Breakouts (Action Required)")
     
     if not master_df.empty:
-        top_df = master_df.copy()
-        top_df = top_df.sort_values(['Score', '1-Year'], ascending=[False, False]).head(20)
+        # Filter for strictly V3 Signal passing stocks
+        top_df = master_df[master_df['V3_Signal'] == True].copy() if not offline_mode else master_df.copy()
         
         if len(top_df) > 0:
-            display_cols = ['Ticker', 'Rating', 'Structural', 'Growth', 'Price (₹)', 'Entry (₹)', 'Investment (₹)', '6-Month', '1-Year']
+            display_cols = ['Ticker', 'Rating', 'Price (₹)', 'Stop (₹)', 'Target 1 (₹)', 'RSI', 'Traded_Val (L)']
             display_df = top_df[display_cols].copy()
             
-            display_df['6-Month'] = display_df['6-Month'].apply(format_pct)
-            display_df['1-Year'] = display_df['1-Year'].apply(format_pct)
             display_df['Price (₹)'] = display_df['Price (₹)'].apply(lambda x: f"₹{x:.2f}")
-            display_df['Entry (₹)'] = display_df['Entry (₹)'].apply(lambda x: f"₹{x:.2f}")
-            display_df['Investment (₹)'] = display_df['Investment (₹)'].apply(lambda x: f"₹{x:,.0f}")
+            display_df['Stop (₹)'] = display_df['Stop (₹)'].apply(lambda x: f"₹{x:.2f}")
+            display_df['Target 1 (₹)'] = display_df['Target 1 (₹)'].apply(lambda x: f"₹{x:.2f}")
+            display_df['RSI'] = display_df['RSI'].apply(lambda x: f"{x:.1f}")
+            display_df['Traded_Val (L)'] = display_df['Traded_Val (L)'].apply(lambda x: f"₹{x:,.0f} L")
             
             st.dataframe(display_df.style.map(style_rating, subset=['Rating']), use_container_width=True, hide_index=True)
         else:
-            st.warning("⚠️ No stocks passed the V6.10 Quality criteria today.")
+            st.warning("⚠️ No stocks passed the strict V3 Swing parameters today.")
     else:
         st.warning("No stocks passed the initial technical screen.")
 
 with tab2:
-    st.subheader("📊 Full Screener Results")
+    st.subheader("📊 Full Screener Results (V3 Diagnostics)")
     if not master_df.empty:
         sector_df = master_df.sort_values(['Score', '1-Year'], ascending=[False, False])
-        display_cols = ['Ticker', 'Rating', 'Structural', 'Price (₹)', 'Entry (₹)', '1-Month', '6-Month', '1-Year', 'P/E']
+        display_cols = ['Ticker', 'Rating', 'V3_Signal', 'Fail_Reason', 'Price (₹)', 'RSI', 'Traded_Val (L)']
         display_df = sector_df[display_cols].copy()
         
-        display_df['1-Month'] = display_df['1-Month'].apply(format_pct)
-        display_df['6-Month'] = display_df['6-Month'].apply(format_pct)
-        display_df['1-Year'] = display_df['1-Year'].apply(format_pct)
+        display_df['V3_Signal'] = display_df['V3_Signal'].apply(lambda x: "✅ PASS" if x else "❌ FAIL")
         display_df['Price (₹)'] = display_df['Price (₹)'].apply(lambda x: f"₹{x:.2f}")
-        display_df['Entry (₹)'] = display_df['Entry (₹)'].apply(lambda x: f"₹{x:.2f}")
-        display_df['P/E'] = display_df['P/E'].apply(lambda x: f"{x:.1f}" if pd.notna(x) else "N/A")
+        display_df['RSI'] = display_df['RSI'].apply(lambda x: f"{x:.1f}")
+        display_df['Traded_Val (L)'] = display_df['Traded_Val (L)'].apply(lambda x: f"₹{x:,.0f} L")
         
         st.dataframe(display_df.style.map(style_rating, subset=['Rating']), use_container_width=True, hide_index=True)
 
@@ -406,76 +415,53 @@ with tab3:
             row = master_df[master_df['Ticker'] == selected].iloc[0].to_dict()
         else:
             with st.spinner(f"Running instant algorithmic analysis on {selected}..."):
-                row = evaluate_single_stock(full_ticker, hist_data, offline_mode, portfolio_capital, risk_per_trade_pct, max_position_cap_pct)
+                row = evaluate_single_stock(full_ticker, hist_data, offline_mode, portfolio_capital, min_trade_val_lakhs)
         
         if row is None:
             st.error(f"Not enough historical data available to analyze {selected}.")
         else:
             st.divider()
-            st.metric("Current Price", f"₹{row['Price (₹)']:.2f}")
+            st.metric("Current Price (Market Entry)", f"₹{row['Price (₹)']:.2f}")
             
-            if row.get('Missing Data', False):
-                st.warning("#### 🎯 Action Required: 🔍 VERIFY EXTERNALLY")
-            elif '👑' in row['Rating'] or '🟢' in row['Rating']:
-                st.success("#### 🎯 Action Required: 🟢 BUY ON DIP (Strong Setup)")
-            elif '🟡' in row['Rating']:
-                st.info("#### 🎯 Action Required: 🟢 BUY ON DIP (Emerging Winner)")
-            elif '🔵' in row['Rating']:
-                st.warning("#### 🎯 Action Required: 🟡 WATCH (No Fundamentals)")
+            if row['V3_Signal']:
+                st.success("#### 🎯 V3 Action: ⚡ BUY BREAKOUT")
             else:
-                st.error("#### 🎯 Action Required: 🔴 AVOID")
+                st.error("#### 🎯 V3 Action: 🔴 AVOID")
+                st.caption(f"**Failed Because:** {row['Fail_Reason']}")
             
             st.divider()
             st.markdown("### 🏆 Compounder Tier")
             st.write(f"**Classification:** {row['Rating']}")
 
-            if "⚠️" in row['Rating']:
-                st.warning("⚠️ **API DATA BLOCKED:** Yahoo Finance refused to provide fundamental data for this stock. The chart looks strong, but you must check Screener.in manually to confirm ROE and Profit Growth.")
-            elif "👑" in row['Rating']:
-                st.success("✅ **MONOPOLY/DUOPOLY:** Structural market leader with pricing power. Hold through 2-3% dips confidently.")
-            elif "🟢" in row['Rating']:
-                st.success("✅ **QUALITY COMPOUNDER:** Strong fundamentals + consistent growth.")
-                st.caption("💡 *To reach '👑 MONOPOLY': Need 3-Year Return > 150% + ROE > 15%*")
-            elif "🟡" in row['Rating']:
-                st.info("⚡ **EMERGING WINNER:** Building momentum with growing earnings.")
-                st.caption("💡 *To reach '👑 MONOPOLY': Need 3-Year Return > 150% + ROE > 15%*")
-            elif "🔵" in row['Rating']:
-                st.warning("⚠️ **MOMENTUM PLAY:** Price strength but fundamentals unconfirmed.")
-                st.caption("💡 *To upgrade to 🟢 QUALITY: Need consistent profit growth (2 of 3 quarters positive)*")
-            elif "CHOPPY" in row['Rating']:
-                st.error("❌ **CHOPPY TREND - AVOID**")
-                st.write("**Why it failed:**")
-                st.write("• Quarterly highs NOT rising consistently, OR")
-                st.write("• Drawdown exceeded 25%")
-                st.caption(f"Details: {row['Structure Note']}")
-            elif "WEAK" in row['Rating']:
-                st.error("❌ **WEAK RETURNS - AVOID**")
-                st.write("**Why it failed:**")
-                st.write("• 6-Month return < 30%, OR")
-                st.write("• 1-Year return < 40%")
+            if "⚠️" in row['Rating']: st.warning("⚠️ **API DATA BLOCKED:** Verify fundamental quality externally.")
+            elif "👑" in row['Rating']: st.success("✅ **MONOPOLY/DUOPOLY**")
+            elif "🟢" in row['Rating']: st.success("✅ **QUALITY COMPOUNDER**")
+            elif "🟡" in row['Rating']: st.info("⚡ **EMERGING WINNER**")
+            elif "🔵" in row['Rating']: st.warning("⚠️ **MOMENTUM PLAY**")
+            elif "CHOPPY" in row['Rating']: st.error("❌ **CHOPPY TREND - AVOID**")
+            elif "WEAK" in row['Rating']: st.error("❌ **WEAK RETURNS - AVOID**")
             
             st.divider()
-            st.markdown("### 📝 Strict Execution Plan")
-            st.warning("⚠️ **Wait for the 2% Dip. Do not buy at Current Market Price.**")
-            st.info(f"🔵 **Limit Order Entry:** ₹{row['Entry (₹)']:.2f}")
-            st.success(f"🟢 **Target (6m):** ₹{row['Target (₹)']:.2f}")
-            st.error(f"🔴 **Stop Loss:** ₹{row['Stop (₹)']:.2f} *(15% buffer)*")
+            st.markdown("### 📝 Strict V3 Execution Plan")
+            st.info(f"🔵 **Entry:** Market Price (₹{row['Price (₹)']:.2f})")
+            st.error(f"🔴 **Stop Loss:** ₹{row['Stop (₹)']:.2f} *(-{row['Stop Pct']:.1%} | 1.5x ATR)*")
+            st.success(f"🟢 **Target 1 (+4%):** ₹{row['Target 1 (₹)']:.2f} *(Sell 50%, Move Stop to Break-Even)*")
+            st.success(f"🟢 **Target 2 (+7%):** ₹{row['Target 2 (₹)']:.2f} *(Sell Remaining 50%)*")
+            st.warning("⏱️ **TIME STOP:** Friday @ 3:10 PM. Cancel GTTs, Sell at Market. Zero exceptions.")
             
-            st.write(f"**Shares to Buy:** {row['Shares']}")
-            st.write(f"**Total Capital Required:** ₹{row['Investment (₹)']:,.0f}")
+            st.write(f"**Capital Allocated:** ₹{row['Investment (₹)']:,.0f}")
             
             st.divider()
-            st.markdown("### 🏢 Fundamentals")
+            st.markdown("### 🏢 Technicals & Fundamentals")
+            st.write(f"**14-Day RSI:** {row['RSI']:.1f}")
+            st.write(f"**Daily Traded Val:** ₹{row['Traded_Val (L)']:.0f} Lakhs")
+            
             if row.get('Missing Data', False):
                 st.error("Data provider blocked fundamental request. Check externally.")
             else:
-                st.write(f"**Sector:** {row['Sector']}")
                 profit_display = format_pct(row['Profit↑'])
-                if isinstance(row['Profit↑'], (int, float)) and row['Profit↑'] > 0: profit_display = f"🟢 {profit_display}"
-                elif isinstance(row['Profit↑'], (int, float)) and row['Profit↑'] < 0: profit_display = f"🔴 {profit_display}"
                 st.write(f"**QoQ Profit Growth:** {profit_display}") 
                 st.write(f"**ROE:** {format_pct(row['ROE'])}")
-                st.write(f"**P/E Ratio:** {row['P/E']:.1f}" if pd.notna(row['P/E']) else "**P/E:** N/A")
             
     with colB:
         if row is not None and full_ticker in hist_data['Close'].columns:
@@ -496,7 +482,12 @@ with tab3:
                 fig.add_trace(go.Bar(x=chart_data.index, y=chart_data['Volume'], name='Volume', marker_color=vol_colors), row=2, col=1)
                 
                 fig.update_layout(template='plotly_white', height=500, showlegend=True, margin=dict(l=0, r=0, t=30, b=0))
-                fig.add_hline(y=row['Entry (₹)'], line_dash="dash", line_color="green", annotation_text="Limit Entry (2% Dip)")
+                
+                # Add horizontal lines for V3 Targets and Stops
+                fig.add_hline(y=row['Target 1 (₹)'], line_dash="dash", line_color="green", annotation_text="T1 (+4%)")
+                fig.add_hline(y=row['Target 2 (₹)'], line_dash="dash", line_color="darkgreen", annotation_text="T2 (+7%)")
+                fig.add_hline(y=row['Stop (₹)'], line_dash="dash", line_color="red", annotation_text="Stop Loss")
+                
                 st.plotly_chart(fig, use_container_width=True)
                 
         if row is not None:
@@ -531,12 +522,12 @@ with tab4:
                 ai_row = master_df[master_df['Ticker'] == selected_ai_stock].iloc[0].to_dict()
             else:
                 with st.spinner(f"Evaluating {selected_ai_stock} for the AI..."):
-                    ai_row = evaluate_single_stock(ai_full_ticker, hist_data, offline_mode, portfolio_capital, risk_per_trade_pct, max_position_cap_pct)
+                    ai_row = evaluate_single_stock(ai_full_ticker, hist_data, offline_mode, portfolio_capital, min_trade_val_lakhs)
 
             if ai_row is None:
                 st.error("Cannot load data for this stock.")
             else:
-                st.info("💡 **Try asking:**\n- Summarize the recent news impact.\n- Why is this marked as '🔴 AVOID'?\n- Is a 2% dip a realistic entry point today?")
+                st.info("💡 **Try asking:**\n- Summarize the recent news impact.\n- Why did this fail the V3 parameters?\n- Is the RSI confirming momentum?")
                 
                 with st.spinner("Gathering context for AI..."):
                     recent_news = fetch_live_news(f"{selected_ai_stock} NSE stock India news", offline=offline_mode)
@@ -559,21 +550,20 @@ with tab4:
                         st.markdown(prompt)
 
                     with st.chat_message("assistant"):
-                        with st.spinner("Analyzing quantitative data and news..."):
+                        with st.spinner("Analyzing V3 swing data and news..."):
                             try:
                                 system_context = f"""
-                                You are a quantitative trading assistant advising a professional trader. 
+                                You are a quantitative trading assistant advising a professional swing trader. 
                                 Analyze the following stock context and answer the user's prompt directly and concisely.
                                 
                                 Stock Ticker: {selected_ai_stock}
-                                System Rating: {ai_row['Rating']}
+                                V3 Signal Status: {'PASS' if ai_row['V3_Signal'] else 'FAIL - ' + ai_row['Fail_Reason']}
                                 Current Price: ₹{ai_row['Price (₹)']}
-                                Limit Order Entry: ₹{ai_row['Entry (₹)']}
-                                1-Year Return: {ai_row['1-Year']:.1%}
-                                QoQ Profit Growth: {ai_row['Profit↑']}
-                                P/E Ratio: {ai_row['P/E']}
-                                ROE: {ai_row['ROE']}
-                                Reason for System Rating: {ai_row['Structure Note']}
+                                14-Day RSI: {ai_row['RSI']:.1f}
+                                Stop Loss: ₹{ai_row['Stop (₹)']}
+                                Target 1: ₹{ai_row['Target 1 (₹)']}
+                                Target 2: ₹{ai_row['Target 2 (₹)']}
+                                System Rating: {ai_row['Rating']}
                                 
                                 Recent News Headlines:
                                 {news_text}
