@@ -10,7 +10,7 @@ import time
 import os
 import google.generativeai as genai
 
-st.set_page_config(page_title="Quant Terminal: V4.1 Prod", page_icon="⚡", layout="wide")
+st.set_page_config(page_title="Quant Terminal: V4.2 Prod", page_icon="⚡", layout="wide")
 
 # --- ANTI-BLOCKING BROWSER SPOOFER ---
 yf_session = requests.Session()
@@ -19,7 +19,7 @@ yf_session.headers.update({
 })
 
 # --- SIDEBAR CONTROLS ---
-st.sidebar.title("⚡ V4.1 Production Terminal")
+st.sidebar.title("⚡ V4.2 Production Terminal")
 st.sidebar.subheader("📂 Upload NSE Stock List")
 uploaded_file = st.sidebar.file_uploader("Upload CSV with SYMBOL column", type=['csv'])
 
@@ -66,7 +66,6 @@ def fetch_live_news(query, offline=False):
             news.append({"Title": clean_title, "Link": link, "Publisher": publisher, "Date": pub_date[:-15]})
         return news
     except Exception as e: 
-        st.warning(f"News fetch failed: {str(e)}")
         return []
 
 # --- MARKET INDICES ---
@@ -160,10 +159,8 @@ def safe_get_fundamentals(full_ticker, offline=False):
                 fundamentals["roe"] = info['returnOnEquity']
                 data_points_found += 1
                 
-        # Defensive quarterly financials extraction
         q_fin = tkr.quarterly_financials
         if q_fin is not None and not q_fin.empty:
-            # Check multiple aliases for Net Income due to provider differences
             target_row = None
             for alias in ['Net Income', 'Net Income Common Stockholders', 'Net Income Continuous Operations']:
                 if alias in q_fin.index:
@@ -224,15 +221,16 @@ def detect_structural_strength(close_series):
     else: return False, f"Excessive drawdown ({max_dd:.1%})"
 
 def classify_compounder(ret_6m, ret_1y, ret_3y, structural, consistent_growth, roe, missing_fundamentals=False):
-    if missing_fundamentals and structural: return "⚠️ DATA BLOCKED (Strong Structure)", 3
-    if (pd.notna(ret_3y) and ret_3y >= 1.50 and structural and consistent_growth and pd.notna(roe) and roe > 0.15): return "👑 MONOPOLY/DUOPOLY", 5
-    if (pd.notna(ret_1y) and ret_1y >= 0.40 and structural and consistent_growth): return "🟢 QUALITY COMPOUNDER", 4
-    if (pd.notna(ret_6m) and ret_6m >= 0.30 and structural and consistent_growth): return "🟡 EMERGING WINNER", 3
-    if pd.notna(ret_6m) and ret_6m >= 0.30 and structural: return "🔵 MOMENTUM PLAY", 2
+    # V4.2 Update: If missing data, pass it technically but label it clearly
     if not structural: return "🔴 CHOPPY", 0
+    if missing_fundamentals: return "⚠️ DATA BLOCKED (Manual Verify)", 3 
+    if (pd.notna(ret_3y) and ret_3y >= 1.50 and consistent_growth and pd.notna(roe) and roe > 0.15): return "👑 MONOPOLY/DUOPOLY", 5
+    if (pd.notna(ret_1y) and ret_1y >= 0.40 and consistent_growth): return "🟢 QUALITY COMPOUNDER", 4
+    if (pd.notna(ret_6m) and ret_6m >= 0.30 and consistent_growth): return "🟡 EMERGING WINNER", 3
+    if pd.notna(ret_6m) and ret_6m >= 0.30: return "🔵 MOMENTUM PLAY", 2
     return "🔴 WEAK RETURNS", 0
 
-# --- ON-DEMAND SINGLE STOCK EVALUATOR ---
+# --- ON-DEMAND SINGLE STOCK EVALUATOR (V4.2 UPDATE) ---
 @st.cache_data(show_spinner=False, ttl=600)
 def evaluate_single_stock(full_ticker, _hist_data, offline, capital, min_trade_val):
     ticker_clean = full_ticker.replace('.NS', '')
@@ -259,32 +257,36 @@ def evaluate_single_stock(full_ticker, _hist_data, offline, capital, min_trade_v
     atr = calc_atr(df_ticker, 14)
     current_atr = atr.iloc[-1]
     
-    # Quality Scoring logic
     ret_1m = (current_price / df_ticker['Close'].iloc[-22] - 1)
     ret_6m = (current_price / df_ticker['Close'].iloc[-130] - 1) 
     ret_1y = (current_price / df_ticker['Close'].iloc[-250] - 1) 
     ret_3y = (current_price / df_ticker['Close'].iloc[0] - 1) if len(df_ticker) >= 700 else None
     
     structural, structure_reason = detect_structural_strength(df_ticker['Close'])
-    
-    # V4: Use the robust safe fetcher
     fund = safe_get_fundamentals(full_ticker, offline)
-    
     rating, score = classify_compounder(ret_6m, ret_1y, ret_3y, structural, fund['consistent_growth'], fund['roe'], fund['missing'])
     
-    # V4 EXACT PARAMETER EVALUATION
-    is_breakout = current_price >= (high52 * 0.98) 
-    is_vol_surge = df_ticker['Volume'].iloc[-1] > (1.5 * avg_vol_20)
-    is_rsi_valid = 50 <= current_rsi <= 72
-    is_quality = score >= 4 
+    # --- V4.2 SMART NET EVALUATION ---
+    # Relaxed Proximity: 5% breathing room for first-pullbacks/flags
+    is_breakout = current_price >= (high52 * 0.95) 
+    
+    # Relaxed Volume: 3-day lookback for institutional footprints
+    max_vol_3d = df_ticker['Volume'].tail(3).max()
+    is_vol_surge = max_vol_3d >= (1.5 * avg_vol_20)
+    
+    # Relaxed RSI: Cap raised to 75
+    is_rsi_valid = 50 <= current_rsi <= 75
+    
+    # Relaxed Quality: Pass if Quality (score >= 4) OR Data Blocked (Yellow Flag)
+    is_quality = (score >= 4) or fund['missing']
     
     v4_signal = False
     fail_reason = []
     
     if traded_val_lakhs < min_trade_val: fail_reason.append(f"Low Traded Val ({traded_val_lakhs:.1f}L)")
-    if not is_breakout: fail_reason.append("Not at 52w High")
-    if not is_vol_surge: fail_reason.append("No Vol Surge")
-    if not is_rsi_valid: fail_reason.append(f"RSI {current_rsi:.1f} outside 50-72")
+    if not is_breakout: fail_reason.append("Not at 52w High (5% limit)")
+    if not is_vol_surge: fail_reason.append("No Vol Surge (Last 3 days)")
+    if not is_rsi_valid: fail_reason.append(f"RSI {current_rsi:.1f} outside 50-75")
     if not is_quality: fail_reason.append("Failed Quality Tier")
     
     if not fail_reason: v4_signal = True
@@ -324,7 +326,7 @@ def build_v4_screener(tickers_list, _hist_data, offline=False, capital=33000, mi
     status_text = st.empty()
     
     for i, ticker in enumerate(processing_list):
-        status_text.text(f"🔍 Validating V4 Prod Parameters for {i+1}/{len(processing_list)}...")
+        status_text.text(f"🔍 Validating V4.2 Smart Net Parameters for {i+1}/{len(processing_list)}...")
         stock_data = evaluate_single_stock(ticker, _hist_data, offline, capital, min_val)
         if stock_data: survivors.append(stock_data)
         progress_bar.progress((i + 1) / len(processing_list))
@@ -358,7 +360,7 @@ if hist_data is None or 'Close' not in hist_data.columns:
     st.error("🚨 Connection failed. Please check the network error details above, clear cache, and try again.")
     st.stop()
 
-with st.spinner("🛡️ Running V4 Prod Funnel..."):
+with st.spinner("🛡️ Running V4.2 Prod Funnel..."):
     master_df = build_v4_screener(all_tickers, hist_data, offline=offline_mode, capital=portfolio_capital, min_val=min_trade_val_lakhs)
 
 # --- UI TABS ---
@@ -369,7 +371,7 @@ def style_rating(val):
     if '👑' in val: return 'background-color: #ffd700; color: #000; font-weight: bold;'
     if '🟢' in val: return 'background-color: #d4edda; color: #155724;'
     if '🟡' in val: return 'background-color: #fff3cd; color: #856404;'
-    if '⚠️' in val: return 'background-color: #e2e3e5; color: #383d41;'
+    if '⚠️' in val: return 'background-color: #fff3cd; color: #856404;'
     if '🔵' in val: return 'background-color: #d1ecf1; color: #0c5460;'
     if '🔴' in val: return 'background-color: #f8d7da; color: #721c24;'
     return ''
@@ -383,7 +385,7 @@ with tab1:
             cols[i].metric(idx['Name'], f"₹{idx['Price']:,.0f}", f"{idx['Change']:.2%}")
     
     st.divider()
-    st.subheader("⚡ V4 Prod Breakouts (Action Required)")
+    st.subheader("⚡ V4.2 Prod Breakouts (Action Required)")
     
     if not master_df.empty:
         top_df = master_df[master_df['V4_Signal'] == True].copy() if not offline_mode else master_df.copy()
@@ -397,7 +399,6 @@ with tab1:
             display_df['Target 1 (₹)'] = display_df['Target 1 (₹)'].apply(lambda x: f"₹{x:.2f}")
             display_df['Target 2 (₹)'] = display_df['Target 2 (₹)'].apply(lambda x: f"₹{x:.2f}")
             
-            # FIXED: width='stretch'
             st.dataframe(display_df.style.map(style_rating, subset=['Rating']), width='stretch', hide_index=True)
         else:
             st.warning("⚠️ No stocks passed the strict V4 Swing parameters today.")
@@ -415,7 +416,6 @@ with tab2:
         display_df['Price (₹)'] = display_df['Price (₹)'].apply(lambda x: f"₹{x:.2f}")
         display_df['RSI'] = display_df['RSI'].apply(lambda x: f"{x:.1f}")
         
-        # FIXED: width='stretch'
         st.dataframe(display_df.style.map(style_rating, subset=['Rating']), width='stretch', hide_index=True)
 
 with tab3:
@@ -449,11 +449,10 @@ with tab3:
             col1, col2 = st.columns(2)
             col1.write("**Technical Pass:** ✅" if "Not at" not in row['Fail_Reason'] and "No Vol" not in row['Fail_Reason'] and "RSI" not in row['Fail_Reason'] else "**Technical Pass:** ❌")
             
-            # FIXED: Dictionary key 'Score' instead of floating variable 'score'
-            col2.write("**Fundamental Pass:** ✅" if row['Score'] >= 4 else "**Fundamental Pass:** ❌")
+            col2.write("**Fundamental Pass:** ✅" if row['Score'] >= 4 or row['Missing_Data'] else "**Fundamental Pass:** ❌")
             
             if row['Missing_Data']:
-                st.warning(f"⚠️ **DATA BLOCKED ({row['Data_Quality']} Integrity):** Yahoo Finance refused fundamental data. Verify ROE externally on Screener.in.")
+                st.warning(f"⚠️ **DATA BLOCKED ({row['Data_Quality']} Integrity):** Yahoo Finance refused fundamental data. Passed Technically. Verify ROCE externally on Screener.in.")
             else:
                 st.info(f"📊 **Data Integrity:** {row['Data_Quality']} Complete")
             
@@ -505,7 +504,6 @@ with tab3:
                 fig.add_hline(y=row['Target 2 (₹)'], line_dash="dash", line_color="darkgreen", annotation_text="T2 (+3.0 ATR)")
                 fig.add_hline(y=row['Stop (₹)'], line_dash="dash", line_color="red", annotation_text="Stop Loss")
                 
-                # FIXED: width='stretch'
                 st.plotly_chart(fig, width='stretch')
                 
         if row is not None:
