@@ -75,10 +75,12 @@ def fetch_market_indices(offline=False):
         return [
             {"Name": "NIFTY 50", "Price": 22500, "Change": -0.012},
             {"Name": "BANK", "Price": 48000, "Change": -0.008},
-            {"Name": "IT", "Price": 35000, "Change": -0.005}
+            {"Name": "IT", "Price": 35000, "Change": -0.005},
+            {"Name": "METAL", "Price": 8500, "Change": 0.021},
+            {"Name": "ENERGY", "Price": 39000, "Change": 0.015}
         ]
-    tickers = ['^NSEI', '^NSEBANK', '^CNXIT']
-    names = ['NIFTY 50', 'BANK', 'IT']
+    tickers = ['^NSEI', '^NSEBANK', '^CNXIT', '^CNXMETAL', '^CNXENERGY']
+    names = ['NIFTY 50', 'BANK', 'IT', 'METAL', 'ENERGY']
     try:
         df = yf.download(tickers, period="5d", progress=False, threads=False)
         if df.empty: return []
