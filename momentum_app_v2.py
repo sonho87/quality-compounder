@@ -10,7 +10,7 @@ import time
 import os
 import google.generativeai as genai
 
-st.set_page_config(page_title="Quant Terminal: V4.2 Prod", page_icon="⚡", layout="wide")
+st.set_page_config(page_title="Quant Terminal: V4.2 Master", page_icon="⚡", layout="wide")
 
 # --- ANTI-BLOCKING BROWSER SPOOFER ---
 yf_session = requests.Session()
@@ -19,12 +19,13 @@ yf_session.headers.update({
 })
 
 # --- SIDEBAR CONTROLS ---
-st.sidebar.title("⚡ V4.2 Production Terminal")
+st.sidebar.title("⚡ V4.2 Master Terminal")
 st.sidebar.subheader("📂 Upload NSE Stock List")
 uploaded_file = st.sidebar.file_uploader("Upload CSV with SYMBOL column", type=['csv'])
 
 if st.sidebar.button("🔄 Clear Cache & Restart"): 
     st.cache_data.clear()
+    st.session_state.clear() # Clears the Memory Vault
     st.sidebar.success("Memory cleared! Ready for fresh data.")
 
 # --- DEVELOPER MODE ---
@@ -68,7 +69,7 @@ def fetch_live_news(query, offline=False):
     except Exception as e: 
         return []
 
-# --- MARKET INDICES ---
+# --- MARKET INDICES (Restored All 5) ---
 @st.cache_data(ttl=300)
 def fetch_market_indices(offline=False):
     if offline:
@@ -102,7 +103,7 @@ def fetch_bulk_price_data(tickers, offline=False):
         if os.path.exists("v6_local_test_data.pkl"):
             return pd.read_pickle("v6_local_test_data.pkl")
         else:
-            df = yf.download(tickers, period="3y", progress=False, threads=True)
+            df = yf.download(list(tickers), period="3y", progress=False, threads=True)
             df.to_pickle("v6_local_test_data.pkl")
             return df
 
@@ -203,27 +204,31 @@ def calc_atr(df_ticker, period=14):
                     abs(df_ticker['Low'] - df_ticker['Close'].shift())))
     return tr.rolling(period).mean()
 
+# --- SMOOTHED STRUCTURAL LOGIC ---
 def detect_structural_strength(close_series):
     if len(close_series) < 250:
         return False, "Insufficient data (< 1 Year)"
+    
     one_year = close_series.tail(250)
-    q1 = one_year.iloc[:62].max()
-    q2 = one_year.iloc[62:125].max()
-    q3 = one_year.iloc[125:187].max()
-    q4 = one_year.iloc[187:].max()
-    quarters_rising = (q2 >= q1 and q3 >= q2 and q4 >= q3)
+    
+    ma_50 = one_year.rolling(50).mean().iloc[-1]
+    ma_200 = one_year.rolling(200).mean().iloc[-1]
+    current_close = one_year.iloc[-1]
+    
+    trend_intact = (current_close > ma_200) and (ma_50 > ma_200)
+    
     rolling_max = one_year.expanding().max()
     drawdown = (one_year / rolling_max) - 1
     max_dd = drawdown.min()
     limited_drawdown = max_dd > -0.25  
-    is_structural = quarters_rising and limited_drawdown
     
-    if is_structural: return True, "Consistent quarterly highs + limited drawdowns"
-    elif not quarters_rising: return False, "Inconsistent quarterly highs"
+    is_structural = trend_intact and limited_drawdown
+    
+    if is_structural: return True, "Trend intact (Price & 50MA > 200MA) + limited drawdown"
+    elif not trend_intact: return False, "Broken Trend (Below 200-SMA)"
     else: return False, f"Excessive drawdown ({max_dd:.1%})"
 
 def classify_compounder(ret_6m, ret_1y, ret_3y, structural, consistent_growth, roe, missing_fundamentals=False):
-    # V4.2 Update: If missing data, pass it technically but label it clearly
     if not structural: return "🔴 CHOPPY", 0
     if missing_fundamentals: return "⚠️ DATA BLOCKED (Manual Verify)", 3 
     if (pd.notna(ret_3y) and ret_3y >= 1.50 and consistent_growth and pd.notna(roe) and roe > 0.15): return "👑 MONOPOLY/DUOPOLY", 5
@@ -252,7 +257,6 @@ def evaluate_single_stock(full_ticker, _hist_data, offline, capital, min_trade_v
     avg_vol_20 = df_ticker['Volume'].tail(20).mean()
     traded_val_lakhs = (avg_vol_20 * current_price) / 100000
     
-    # Technical Indicators
     high52 = df_ticker['High'].tail(252).max()
     rsi = calc_rsi(df_ticker['Close'], 14)
     current_rsi = rsi.iloc[-1]
@@ -269,17 +273,10 @@ def evaluate_single_stock(full_ticker, _hist_data, offline, capital, min_trade_v
     rating, score = classify_compounder(ret_6m, ret_1y, ret_3y, structural, fund['consistent_growth'], fund['roe'], fund['missing'])
     
     # --- V4.2 SMART NET EVALUATION ---
-    # Relaxed Proximity: 5% breathing room for first-pullbacks/flags
     is_breakout = current_price >= (high52 * 0.95) 
-    
-    # Relaxed Volume: 3-day lookback for institutional footprints
     max_vol_3d = df_ticker['Volume'].tail(3).max()
     is_vol_surge = max_vol_3d >= (1.5 * avg_vol_20)
-    
-    # Relaxed RSI: Cap raised to 75
     is_rsi_valid = 50 <= current_rsi <= 75
-    
-    # Relaxed Quality: Pass if Quality (score >= 4) OR Data Blocked (Yellow Flag)
     is_quality = (score >= 4) or fund['missing']
     
     v4_signal = False
@@ -293,7 +290,6 @@ def evaluate_single_stock(full_ticker, _hist_data, offline, capital, min_trade_v
     
     if not fail_reason: v4_signal = True
     
-    # V4 DYNAMIC ATR TARGETS
     raw_stop_dist = 1.5 * current_atr
     raw_stop_pct = raw_stop_dist / current_price
     stop_pct = max(0.03, min(0.06, raw_stop_pct)) 
@@ -320,9 +316,9 @@ def evaluate_single_stock(full_ticker, _hist_data, offline, capital, min_trade_v
 
 # --- DEPENDENCY INJECTED SCREENER BUILDER ---
 @st.cache_data(ttl=60)
-def build_v4_screener(tickers_list, _hist_data, offline=False, capital=33000, min_val=50):
+def build_v4_screener(tickers_tuple, _hist_data, offline=False, capital=33000, min_val=50):
     survivors = []
-    processing_list = tickers_list[:15] if offline else tickers_list
+    processing_list = list(tickers_tuple)[:15] if offline else list(tickers_tuple)
     
     progress_bar = st.progress(0)
     status_text = st.empty()
@@ -355,15 +351,20 @@ else:
 
 if offline_mode: st.info("🧪 **OFFLINE MODE ACTIVE:** Reading 15 stocks from local database.")
 
-with st.spinner("📥 Fetching 3-year bulk price data..."):
-    hist_data = fetch_bulk_price_data(all_tickers, offline=offline_mode)
+# --- THE FIX: SESSION STATE MEMORY VAULT ---
+if 'hist_data' not in st.session_state:
+    with st.spinner("📥 Fetching 3-year bulk price data (Locking into memory)..."):
+        st.session_state['hist_data'] = fetch_bulk_price_data(tuple(all_tickers), offline=offline_mode)
+
+hist_data = st.session_state['hist_data']
     
 if hist_data is None or 'Close' not in hist_data.columns:
     st.error("🚨 Connection failed. Please check the network error details above, clear cache, and try again.")
     st.stop()
 
 with st.spinner("🛡️ Running V4.2 Prod Funnel..."):
-    master_df = build_v4_screener(all_tickers, hist_data, offline=offline_mode, capital=portfolio_capital, min_val=min_trade_val_lakhs)
+    # Pass as a tuple to satisfy Streamlit cache hashing requirements
+    master_df = build_v4_screener(tuple(all_tickers), hist_data, offline=offline_mode, capital=portfolio_capital, min_val=min_trade_val_lakhs)
 
 # --- UI TABS ---
 tab1, tab2, tab3, tab4 = st.tabs(["⚡ V4 Action Signals", "📊 Full Screener", "🔍 Deep Dive", "🤖 AI Co-Pilot"])
