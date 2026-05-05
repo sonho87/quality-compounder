@@ -94,19 +94,40 @@ def calc_atr(bars, period=14):
         trs.append(max(b['high'] - b['low'], abs(b['high'] - pc), abs(b['low'] - pc)))
     return sum(trs[-period:]) / period
 
-def detect_structural(closes):
+def detect_structural(closes, highs):
+    """Structural Strength — ALL 3 conditions required (V4 spec §3):
+    (a) Close > MA200  (b) MA50 > MA200  (c) Drawdown from 1Y high > -25%"""
     if len(closes) < 250:
         return False
-    one_year = closes[-250:]
-    ma50  = sum(one_year[-50:]) / 50
-    ma200 = sum(one_year) / 200
-    return one_year[-1] > ma200 and ma50 > ma200
+    year_closes = closes[-250:]
+    year_highs  = highs[-250:]
+    last        = year_closes[-1]
+    ma50        = sum(year_closes[-50:]) / 50
+    ma200       = sum(year_closes) / 200
+    if last <= ma200:  return False          # (a)
+    if ma50  <= ma200: return False          # (b)
+    rolling_high = max(year_highs)
+    if last / rolling_high - 1 <= -0.25: return False  # (c) drawdown limit
+    return True
 
-def classify_compounder(ret6m, ret1y, structural):
+def classify_compounder(ret6m, ret1y, ret3y, structural,
+                        consistent_growth=None, roe=None):
+    """5-tier classification (V4 spec §4).
+    consistent_growth / roe = None → bypass (OHLCV-only mode)."""
     if not structural:
         return "🔴 CHOPPY", 0
-    if not math.isnan(ret1y) and ret1y >= 0.40:
+    growth_ok = consistent_growth is None or consistent_growth
+    roe_ok    = roe is None or roe > 15
+    # Tier 5
+    if not math.isnan(ret3y) and ret3y >= 1.50 and growth_ok and roe_ok:
+        return "🏆 MONOPOLY/DUOPOLY", 5
+    # Tier 4
+    if not math.isnan(ret1y) and ret1y >= 0.40 and growth_ok:
         return "🟢 QUALITY COMPOUNDER", 4
+    # Tier 3
+    if not math.isnan(ret6m) and ret6m >= 0.30 and growth_ok:
+        return "🌱 EMERGING WINNER", 3
+    # Tier 2
     if not math.isnan(ret6m) and ret6m >= 0.30:
         return "🔵 MOMENTUM PLAY", 2
     return "🔴 WEAK RETURNS", 0
@@ -202,7 +223,8 @@ def generate_live_data():
         prev_close = closes[-2]
         pct_change = price / prev_close - 1
         avg_vol20  = sum(volumes[-20:]) / 20
-        traded_val = (avg_vol20 * price) / 100000
+        max_vol3d  = max(volumes[-3:])
+        traded_val = (avg_vol20 * price) / 100000   # ₹ Lakhs
         high52w    = max(highs[-252:])
         rsi        = calc_rsi(closes, 14)
         atr        = calc_atr(bars, 14)
@@ -210,12 +232,20 @@ def generate_live_data():
         maj_res    = max(highs[-250:])
         sup_zone   = min(lows[-20:])
         breakdown  = min(lows[-50:])
-        structural = detect_structural(closes)
+        # Structural with drawdown check (all 3 conditions per spec §3)
+        structural = detect_structural(closes, highs)
         ret6m      = price / closes[-130] - 1
         ret1y      = price / closes[-250] - 1
-        rating, score = classify_compounder(ret6m, ret1y, structural)
-        max_vol3d  = max(volumes[-3:])
-        v4         = (price >= high52w * 0.95) and (max_vol3d >= 1.5 * avg_vol20) and (50 <= rsi <= 75)
+        ret3y      = price / closes[-700] - 1 if len(closes) >= 700 else math.nan
+        rating, score = classify_compounder(ret6m, ret1y, ret3y, structural)
+        # V4 Signal — all 5 rules (spec §5)
+        v4 = (
+            traded_val >= 50                       and  # Rule 1: Liquidity
+            price >= high52w * 0.95                and  # Rule 2: Proximity
+            max_vol3d >= 1.5 * avg_vol20           and  # Rule 3: Volume surge
+            50 < rsi < 75                          and  # Rule 4: RSI strictly (50,75)
+            score >= 4                                  # Rule 5: Tier 4 or 5
+        )
         stop_pct   = max(0.03, min(0.06, (1.5 * atr) / price))
         stop       = price * (1 - stop_pct)
         t1         = price + 1.5 * atr
@@ -227,6 +257,7 @@ def generate_live_data():
             v4Signal=v4, price=round(price, 2), change=round(pct_change, 6),
             rsi=round(rsi, 2), tradedVal=round(traded_val, 1),
             ret6m=round(ret6m, 6), ret1y=round(ret1y, 6),
+            ret3y=(round(ret3y, 6) if not math.isnan(ret3y) else 0),
             target1=round(t1, 2), target2=round(t2, 2), stop=round(stop, 2),
             shares=shares, investment=round(shares * price, 2),
             immRes=round(imm_res, 2), majRes=round(maj_res, 2),
@@ -238,10 +269,12 @@ def generate_live_data():
         v4_str = "⚡ YES" if v4 else "—"
         print(f"{ticker:15s} ₹{price:>9.2f}  {rsi:6.1f}  {ret1y:+7.1%}  {rating:25s}  {v4_str}")
 
-    v4_count = sum(1 for s in stocks if s['v4Signal'])
-    quality  = sum(1 for s in stocks if s['rating'] == '🟢 QUALITY COMPOUNDER')
-    momentum = sum(1 for s in stocks if s['rating'] == '🔵 MOMENTUM PLAY')
-    print(f"\n📈 Results: {len(stocks)} stocks · {quality} Quality · {momentum} Momentum · {v4_count} V4 signals")
+    v4_count  = sum(1 for s in stocks if s['v4Signal'])
+    monopoly  = sum(1 for s in stocks if s['rating'] == '🏆 MONOPOLY/DUOPOLY')
+    quality   = sum(1 for s in stocks if s['rating'] == '🟢 QUALITY COMPOUNDER')
+    emerging  = sum(1 for s in stocks if s['rating'] == '🌱 EMERGING WINNER')
+    momentum  = sum(1 for s in stocks if s['rating'] == '🔵 MOMENTUM PLAY')
+    print(f"\n📈 Results: {len(stocks)} stocks · {monopoly} Monopoly · {quality} Quality · {emerging} Emerging · {momentum} Momentum · {v4_count} V4 signals")
 
     # ── Write TypeScript file ──────────────────────────────────────────────
     now = datetime.datetime.now().strftime('%d %b %Y, %H:%M IST')
@@ -252,7 +285,7 @@ def generate_live_data():
         "import type { StockResult, MarketIndex } from './types';",
         "",
         "// AUTO-GENERATED — Kite API live data",
-        f"// Fetched: {now}  |  Formula: RSI(14), ATR(14), MA50>MA200 structural filter",
+        f"// Fetched: {now}  |  V4 Breakout Swing System: 5-tier, drawdown filter, RSI strictly (50,75)",
         "// DO NOT edit manually — re-run: python3 scripts/refresh_live_data.py",
         "",
         f"export const LIVE_FETCH_TIME = '{now}';",
@@ -275,7 +308,7 @@ def generate_live_data():
             f"    rating: '{r}' as const, score: {s['score']},",
             f"    v4Signal: {jb(s['v4Signal'])}, price: {s['price']}, change: {s['change']},",
             f"    rsi: {s['rsi']}, tradedVal: {s['tradedVal']},",
-            f"    ret6m: {s['ret6m']}, ret1y: {s['ret1y']},",
+            f"    ret6m: {s['ret6m']}, ret1y: {s['ret1y']}, ret3y: {s['ret3y']},",
             f"    target1: {s['target1']}, target2: {s['target2']}, stop: {s['stop']},",
             f"    shares: {s['shares']}, investment: {s['investment']},",
             f"    immRes: {s['immRes']}, majRes: {s['majRes']}, supZone: {s['supZone']}, breakdown: {s['breakdown']},",

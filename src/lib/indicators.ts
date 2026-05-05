@@ -1,15 +1,18 @@
+// indicators.ts
+// STRICT port of the V4 Breakout Swing System specification.
+// DO NOT change any periods, thresholds, or logic without explicit instruction.
+
 import type { OHLCV, StockResult, Rating } from './types';
 
-// --- RSI (exact port of Python calc_rsi) ---
+// ─── 1. RSI — 14-period Wilder smoothing ────────────────────────────────────
 export function calcRSI(closes: number[], period = 14): number[] {
   const rsi: number[] = new Array(closes.length).fill(NaN);
   if (closes.length < period + 1) return rsi;
 
   const deltas = closes.map((v, i) => (i === 0 ? 0 : v - closes[i - 1]));
-  const gains = deltas.map(d => (d > 0 ? d : 0));
+  const gains  = deltas.map(d => (d > 0 ? d : 0));
   const losses = deltas.map(d => (d < 0 ? -d : 0));
 
-  // Initial simple averages for first period
   let avgGain = gains.slice(1, period + 1).reduce((a, b) => a + b, 0) / period;
   let avgLoss = losses.slice(1, period + 1).reduce((a, b) => a + b, 0) / period;
 
@@ -27,18 +30,18 @@ export function calcRSI(closes: number[], period = 14): number[] {
   return rsi;
 }
 
-// --- ATR (exact port of Python calc_atr) ---
+// ─── 2. ATR — 14-period average true range ──────────────────────────────────
 export function calcATR(bars: OHLCV[], period = 14): number[] {
   const atr: number[] = new Array(bars.length).fill(NaN);
   if (bars.length < period + 1) return atr;
 
   const tr = bars.map((bar, i) => {
     if (i === 0) return bar.high - bar.low;
-    const prevClose = bars[i - 1].close;
+    const pc = bars[i - 1].close;
     return Math.max(
       bar.high - bar.low,
-      Math.abs(bar.high - prevClose),
-      Math.abs(bar.low - prevClose)
+      Math.abs(bar.high - pc),
+      Math.abs(bar.low - pc)
     );
   });
 
@@ -50,107 +53,183 @@ export function calcATR(bars: OHLCV[], period = 14): number[] {
   return atr;
 }
 
-// --- Structural Strength (exact port of Python detect_structural_strength) ---
-export function detectStructuralStrength(closes: number[]): boolean {
-  if (closes.length < 250) return false;
-  const oneYear = closes.slice(-250);
-  const lastPrice = oneYear[oneYear.length - 1];
+// ─── 3. STRUCTURAL STRENGTH — all 3 conditions must pass ────────────────────
+// Conditions (over last 250 trading days):
+//   (a) Current Close > SMA 200
+//   (b) SMA 50 > SMA 200
+//   (c) Drawdown from 1-year rolling high > -25%
+//       i.e. Current Price / max(Highs last 250d) - 1 > -0.25
+export function detectStructuralStrength(closes: number[], highs: number[]): boolean {
+  if (closes.length < 250 || highs.length < 250) return false;
 
-  const ma50arr = oneYear.slice(-50);
-  const ma50 = ma50arr.reduce((a, b) => a + b, 0) / 50;
-  const ma200 = oneYear.reduce((a, b) => a + b, 0) / 200;
+  const yearCloses = closes.slice(-250);
+  const yearHighs  = highs.slice(-250);
+  const lastPrice  = yearCloses[yearCloses.length - 1];
 
-  return lastPrice > ma200 && ma50 > ma200;
+  const ma50  = yearCloses.slice(-50).reduce((a, b) => a + b, 0) / 50;
+  const ma200 = yearCloses.reduce((a, b) => a + b, 0) / 200;
+
+  // (a) Price above MA200
+  if (lastPrice <= ma200) return false;
+  // (b) Golden cross
+  if (ma50 <= ma200) return false;
+  // (c) Max drawdown from 1-year high ≤ 25%
+  const rollingHigh = Math.max(...yearHighs);
+  if (lastPrice / rollingHigh - 1 <= -0.25) return false;
+
+  return true;
 }
 
-// --- Classify Compounder (exact port of Python classify_compounder) ---
+// ─── 4. CLASSIFICATION — 5-tier system ─────────────────────────────────────
+// consistentGrowth: pass null to bypass (when quarterly income data unavailable)
+// roe:             pass null to bypass (when fundamental data unavailable)
+// Returns { rating, score } where score: 5=Monopoly, 4=Quality, 3=Emerging, 2=Momentum, 0=Weak
 export function classifyCompounder(
   ret6m: number,
   ret1y: number,
-  structural: boolean
+  ret3y: number,
+  structural: boolean,
+  consistentGrowth: boolean | null = null,
+  roe: number | null = null
 ): { rating: Rating; score: number } {
   if (!structural) return { rating: '🔴 CHOPPY', score: 0 };
-  if (!isNaN(ret1y) && ret1y >= 0.40) return { rating: '🟢 QUALITY COMPOUNDER', score: 4 };
-  if (!isNaN(ret6m) && ret6m >= 0.30) return { rating: '🔵 MOMENTUM PLAY', score: 2 };
+
+  // When data is unavailable, bypass the condition (treat as satisfied)
+  const growthOk = consistentGrowth === null || consistentGrowth === true;
+  const roeOk    = roe === null || roe > 15;
+
+  // Tier 5: Monopoly / Duopoly
+  if (!isNaN(ret3y) && ret3y >= 1.50 && growthOk && roeOk)
+    return { rating: '🏆 MONOPOLY/DUOPOLY', score: 5 };
+
+  // Tier 4: Quality Compounder
+  if (!isNaN(ret1y) && ret1y >= 0.40 && growthOk)
+    return { rating: '🟢 QUALITY COMPOUNDER', score: 4 };
+
+  // Tier 3: Emerging Winner
+  if (!isNaN(ret6m) && ret6m >= 0.30 && growthOk)
+    return { rating: '🌱 EMERGING WINNER', score: 3 };
+
+  // Tier 2: Momentum Play (ignores growth/fundamentals)
+  if (!isNaN(ret6m) && ret6m >= 0.30)
+    return { rating: '🔵 MOMENTUM PLAY', score: 2 };
+
   return { rating: '🔴 WEAK RETURNS', score: 0 };
 }
 
-// --- V4 Signal (exact port) ---
+// ─── 5. V4 BREAKOUT SIGNAL — all 5 rules must pass ──────────────────────────
+// Rule 1 — Liquidity:    tradedVal >= ₹50 Lakhs
+// Rule 2 — Proximity:    price >= 52wHigh * 0.95
+// Rule 3 — Volume Surge: max(vol last 3d) >= 1.5 × avg(vol 20d)
+// Rule 4 — Momentum:     RSI strictly > 50 AND strictly < 75
+// Rule 5 — Quality:      score >= 4 (Tier 4+5)
+//                        BYPASS this rule if score is null/undefined (no fundamental data)
 export function calcV4Signal(
   price: number,
   high52w: number,
   volumes: number[],
-  rsi: number
+  rsi: number,
+  tradedVal: number,
+  score: number | null = null
 ): boolean {
+  // Rule 1: Liquidity — traded value ≥ ₹50 Lakhs
+  if (tradedVal < 50) return false;
+
+  // Rule 2: Within 5% of 52-week high
+  if (price < high52w * 0.95) return false;
+
+  // Rule 3: Volume surge
   const avgVol20 = volumes.slice(-20).reduce((a, b) => a + b, 0) / 20;
   const maxVol3d = Math.max(...volumes.slice(-3));
-  return price >= high52w * 0.95 && maxVol3d >= 1.5 * avgVol20 && rsi >= 50 && rsi <= 75;
+  if (maxVol3d < 1.5 * avgVol20) return false;
+
+  // Rule 4: RSI strictly between 50 and 75 (not 50, not 75)
+  if (rsi <= 50 || rsi >= 75) return false;
+
+  // Rule 5: Quality — must be Tier 4 or Tier 5
+  // Bypass if score is null (fundamental data unavailable)
+  if (score !== null && score < 4) return false;
+
+  return true;
 }
 
-// --- Main evaluator: mirrors evaluate_single_stock ---
+// ─── 6. FULL STOCK EVALUATOR ────────────────────────────────────────────────
+// minTradeVal is kept for backward-compat but Liquidity Rule is enforced inside V4 signal.
+// All stocks are returned regardless; v4Signal=false if tradedVal < 50 Lakhs.
 export function evaluateStock(
   ticker: string,
   bars: OHLCV[],
   capital: number,
-  minTradeVal: number
+  _minTradeVal = 0
 ): StockResult | null {
   if (bars.length < 252) return null;
 
-  const closes = bars.map(b => b.close);
-  const highs = bars.map(b => b.high);
-  const lows = bars.map(b => b.low);
+  const closes  = bars.map(b => b.close);
+  const highs   = bars.map(b => b.high);
+  const lows    = bars.map(b => b.low);
   const volumes = bars.map(b => b.volume);
 
   const currentPrice = closes[closes.length - 1];
-  const prevClose = closes[closes.length - 2];
-  const pctChange = currentPrice / prevClose - 1;
+  const prevClose    = closes[closes.length - 2];
+  const pctChange    = currentPrice / prevClose - 1;
 
-  const avgVol20 = volumes.slice(-20).reduce((a, b) => a + b, 0) / 20;
-  const tradedValLakhs = (avgVol20 * currentPrice) / 100000;
-  if (tradedValLakhs < minTradeVal) return null;
+  // Traded Value in ₹ Lakhs
+  const avgVol20    = volumes.slice(-20).reduce((a, b) => a + b, 0) / 20;
+  const tradedVal   = (avgVol20 * currentPrice) / 100000;
 
   const high52w = Math.max(...highs.slice(-252));
-  const rsiArr = calcRSI(closes, 14);
+
+  const rsiArr     = calcRSI(closes, 14);
   const currentRSI = rsiArr[rsiArr.length - 1];
-  const atrArr = calcATR(bars, 14);
+
+  const atrArr     = calcATR(bars, 14);
   const currentATR = atrArr[atrArr.length - 1];
 
-  // Key levels (exact port)
-  const immRes = Math.max(...highs.slice(-20));
-  const majRes = Math.max(...highs.slice(-250));
-  const supZone = Math.min(...lows.slice(-20));
+  // Key price levels
+  const immRes   = Math.max(...highs.slice(-20));
+  const majRes   = Math.max(...highs.slice(-250));
+  const supZone  = Math.min(...lows.slice(-20));
   const breakdown = Math.min(...lows.slice(-50));
 
-  const structural = detectStructuralStrength(closes);
+  // Structural strength (all 3 conditions)
+  const structural = detectStructuralStrength(closes, highs);
 
+  // Returns: 6M (130d), 1Y (250d), 3Y (700d)
   const ret6m = currentPrice / closes[closes.length - 130] - 1;
   const ret1y = currentPrice / closes[closes.length - 250] - 1;
-  const { rating, score } = classifyCompounder(ret6m, ret1y, structural);
+  const ret3y = bars.length >= 700
+    ? currentPrice / closes[closes.length - 700] - 1
+    : NaN;
 
-  const v4Signal = calcV4Signal(currentPrice, high52w, volumes, currentRSI);
+  // 5-tier classification (bypass consistency/ROE — no fundamental data from OHLCV)
+  const { rating, score } = classifyCompounder(ret6m, ret1y, ret3y, structural, null, null);
 
-  // Trade plan (exact port)
-  const stopPct = Math.max(0.03, Math.min(0.06, (1.5 * currentATR) / currentPrice));
+  // V4 Signal (all 5 rules)
+  const v4Signal = calcV4Signal(currentPrice, high52w, volumes, currentRSI, tradedVal, score);
+
+  // Risk management
+  const stopPct  = Math.max(0.03, Math.min(0.06, (1.5 * currentATR) / currentPrice));
   const stopPrice = currentPrice * (1 - stopPct);
-  const target1 = currentPrice + 1.5 * currentATR;
-  const target2 = currentPrice + 3.0 * currentATR;
-  const shares = Math.floor(capital / currentPrice);
+  const target1  = currentPrice + 1.5 * currentATR;
+  const target2  = currentPrice + 3.0 * currentATR;
+  const shares   = Math.floor(capital / currentPrice);
 
   return {
-    ticker: ticker.replace('.NS', ''),
+    ticker:    ticker.replace('.NS', '').replace('.BO', ''),
     fullTicker: ticker,
     rating,
     score,
     v4Signal,
-    price: currentPrice,
-    change: pctChange,
-    rsi: currentRSI,
-    tradedVal: tradedValLakhs,
+    price:     currentPrice,
+    change:    pctChange,
+    rsi:       currentRSI,
+    tradedVal,
     ret6m,
     ret1y,
+    ret3y,
     target1,
     target2,
-    stop: stopPrice,
+    stop:      stopPrice,
     shares,
     investment: shares * currentPrice,
     immRes,
@@ -158,12 +237,12 @@ export function evaluateStock(
     supZone,
     breakdown,
     structural,
-    atr: currentATR,
-    sector: 'N/A',
-    mcap: 'N/A',
-    pe: null,
-    roe: null,
-    bookVal: 'N/A',
-    divYield: '0.00%',
+    atr:       currentATR,
+    sector:    'N/A',
+    mcap:      'N/A',
+    pe:        null,
+    roe:       null,
+    bookVal:   'N/A',
+    divYield:  'N/A',
   };
 }
