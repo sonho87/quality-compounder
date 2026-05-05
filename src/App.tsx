@@ -9,6 +9,8 @@ import OverviewTab from '@/components/tabs/OverviewTab';
 import ScreenerTab from '@/components/tabs/ScreenerTab';
 import TearSheetTab from '@/components/tabs/TearSheetTab';
 import AICopilotTab from '@/components/tabs/AICopilotTab';
+import KiteLoginBanner from '@/components/KiteLoginBanner';
+import { useKiteData } from '@/hooks/useKiteData';
 
 type Tab = 'overview' | 'screener' | 'tearsheet' | 'ai';
 
@@ -39,11 +41,28 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
-  // Use live Kite data by default, fall back to mock if needed
-  const [stocks, setStocks] = useState<StockResult[]>(LIVE_STOCKS.length > 0 ? LIVE_STOCKS : MOCK_STOCKS);
+
+  // Kite OAuth live data hook
+  const { sessionState, userName, stocks: kiteStocks, refresh: kiteRefresh, logout: kiteLogout }
+    = useKiteData(settings.capitalPerTrade);
+
+  // Priority: kiteStocks (fresh from API) → LIVE_STOCKS (last saved) → MOCK_STOCKS
+  const baseStocks: StockResult[] =
+    kiteStocks ?? (LIVE_STOCKS.length > 0 ? LIVE_STOCKS : MOCK_STOCKS);
+
+  const [stocks, setStocks] = useState<StockResult[]>(baseStocks);
   const [portfolio, setPortfolio] = useState<PortfolioPosition[]>([]);
-  const [selectedTicker, setSelectedTicker] = useState((LIVE_STOCKS[0] ?? MOCK_STOCKS[0])?.ticker ?? '');
-  const isLiveData = LIVE_STOCKS.length > 0;
+  const [selectedTicker, setSelectedTicker] = useState(baseStocks[0]?.ticker ?? '');
+
+  // When Kite finishes loading fresh data, adopt it
+  useEffect(() => {
+    if (kiteStocks && kiteStocks.length > 0) {
+      setStocks(kiteStocks);
+      setSelectedTicker(kiteStocks[0].ticker);
+    }
+  }, [kiteStocks]);
+
+  const isLiveData = LIVE_STOCKS.length > 0 || sessionState.status === 'ready';
 
   // Dark mode sync
   useEffect(() => {
@@ -201,12 +220,22 @@ export default function App() {
         {/* Scrollable content area */}
         <main className="flex-1 overflow-y-auto">
           <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 py-6">
-            {/* Live data banner */}
-            {isLiveData && (
-              <div className="flex items-center gap-2 mb-4 px-4 py-2.5 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900 rounded-xl text-xs font-semibold text-emerald-700 dark:text-emerald-400">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse flex-shrink-0"></span>
-                Live Kite data · {LIVE_FETCH_TIME} · 19 NSE stocks
-                <span className="ml-auto badge-amber">⚠️ Market in correction — no golden crosses on any large-cap</span>
+            {/* Kite login / live data banner */}
+            <KiteLoginBanner
+              sessionState={sessionState}
+              userName={userName}
+              onRefresh={kiteRefresh}
+              onLogout={kiteLogout}
+            />
+
+            {/* Fallback: show last-saved data timestamp if no fresh Kite session */}
+            {sessionState.status === 'none' && LIVE_FETCH_TIME && (
+              <div className="flex items-center gap-2 mb-4 px-4 py-2 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-500 dark:text-slate-400">
+                <span className="w-1.5 h-1.5 rounded-full bg-slate-400 flex-shrink-0" />
+                Showing snapshot from {LIVE_FETCH_TIME}
+                <span className="ml-auto text-amber-600 dark:text-amber-400 font-medium">
+                  ⚠️ Login with Kite above to get today's data
+                </span>
               </div>
             )}
 

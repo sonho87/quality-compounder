@@ -1,75 +1,57 @@
-import { useEffect, useRef } from 'react';
+// TradingViewChart.tsx
+// Uses the TradingView iframe embed — works on ALL domains, no API key needed.
+// The script-based widget only works on whitelisted domains (causes the Apple fallback bug).
 
 interface TradingViewChartProps {
-  symbol: string;
+  symbol: string;       // e.g. "RELIANCE"
   theme?: 'light' | 'dark';
   height?: number;
 }
 
-declare global {
-  interface Window {
-    TradingView: {
-      widget: new (config: Record<string, unknown>) => void;
-    };
-  }
-}
+export default function TradingViewChart({
+  symbol,
+  theme = 'light',
+  height = 480,
+}: TradingViewChartProps) {
+  // Studies: RSI + 2 simple MAs (50 & 200)
+  const studies = [
+    'RSI@tv-basicstudies',
+    'MASimple@tv-basicstudies',
+    'MASimple@tv-basicstudies',
+  ].join('%1F');
 
-export default function TradingViewChart({ symbol, theme = 'light', height = 480 }: TradingViewChartProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const widgetRef = useRef<unknown>(null);
+  const params = new URLSearchParams({
+    symbol: `NSE:${symbol}`,
+    interval: 'D',
+    timezone: 'Asia/Kolkata',
+    theme,
+    style: '1',
+    locale: 'in',
+    toolbar_bg: theme === 'dark' ? '#1e293b' : '#f8fafc',
+    enable_publishing: 'false',
+    hide_side_toolbar: 'false',
+    allow_symbol_change: 'false',
+    withdateranges: 'true',
+    range: '12M',
+    hide_top_toolbar: 'false',
+    saveimage: 'false',
+    studies,
+  });
 
-  useEffect(() => {
-    const containerId = `tv_chart_${symbol.replace(/[^a-zA-Z0-9]/g, '_')}`;
-    if (!containerRef.current) return;
-
-    const loadWidget = () => {
-      if (!containerRef.current) return;
-      containerRef.current.innerHTML = `<div id="${containerId}" style="height:${height}px;width:100%;"></div>`;
-      widgetRef.current = new window.TradingView.widget({
-        autosize: true,
-        symbol: `NSE:${symbol}`,
-        interval: 'D',
-        timezone: 'Asia/Kolkata',
-        theme,
-        style: '1',
-        locale: 'in',
-        toolbar_bg: theme === 'dark' ? '#1e293b' : '#f8fafc',
-        enable_publishing: false,
-        hide_side_toolbar: false,
-        allow_symbol_change: false,
-        studies: [
-          'RSI@tv-basicstudies',
-          { id: 'MASimple@tv-basicstudies', inputs: { length: 50 } },
-          { id: 'MASimple@tv-basicstudies', inputs: { length: 200 } },
-        ],
-        container_id: containerId,
-        hide_top_toolbar: false,
-        save_image: false,
-        withdateranges: true,
-        range: '12M',
-      });
-    };
-
-    if (window.TradingView) {
-      loadWidget();
-    } else {
-      const script = document.createElement('script');
-      script.src = 'https://s3.tradingview.com/tv.js';
-      script.async = true;
-      script.onload = loadWidget;
-      document.head.appendChild(script);
-    }
-
-    return () => {
-      if (containerRef.current) containerRef.current.innerHTML = '';
-    };
-  }, [symbol, theme, height]);
+  const src = `https://s.tradingview.com/widgetembed/?frameElementId=tv_${symbol}&${params.toString()}`;
 
   return (
     <div
-      ref={containerRef}
-      className="w-full rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700"
+      className="w-full rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
       style={{ height }}
-    />
+    >
+      <iframe
+        key={`${symbol}-${theme}`}   // force re-mount on symbol or theme change
+        src={src}
+        style={{ width: '100%', height: '100%', border: 'none', display: 'block' }}
+        allowFullScreen
+        title={`TradingView chart — NSE:${symbol}`}
+      />
+    </div>
   );
 }
