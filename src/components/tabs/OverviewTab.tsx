@@ -161,45 +161,62 @@ export default function OverviewTab({ stocks, portfolio, onSelectTicker, onNavig
         )}
       </div>
 
-      {/* Top Compounders */}
-      <div className="metric-card overflow-hidden">
-        <div className="flex items-center gap-2 px-5 py-4 border-b border-slate-100 dark:border-slate-800">
-          <TrendingUp className="w-4 h-4 text-emerald-500" />
-          <h2 className="font-bold text-slate-900 dark:text-slate-100">Quality Compounders</h2>
-          <span className="badge-green">{stocks.filter(s => s.rating === '🟢 QUALITY COMPOUNDER').length}</span>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-100 dark:border-slate-800">
-                {['Ticker', 'Price', '6M Return', '1Y Return', 'RSI', 'Sector', 'MCap'].map(h => (
-                  <th key={h} className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-900/50">
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
-              {stocks.filter(s => s.rating === '🟢 QUALITY COMPOUNDER').map(s => (
-                <tr key={s.ticker} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer"
-                  onClick={() => { onSelectTicker(s.ticker); onNavigateToTearSheet(); }}>
-                  <td className="px-4 py-3 font-bold font-mono">{s.ticker}</td>
-                  <td className="px-4 py-3 font-mono">{fmtINRDecimals(s.price)}</td>
-                  <td className={`px-4 py-3 font-mono font-bold ${s.ret6m >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
-                    {fmtPct(s.ret6m)}
-                  </td>
-                  <td className={`px-4 py-3 font-mono font-bold ${s.ret1y >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
-                    {fmtPct(s.ret1y)}
-                  </td>
-                  <td className="px-4 py-3 font-mono text-sm">{fmtNum(s.rsi, 1)}</td>
-                  <td className="px-4 py-3 text-xs text-slate-500">{s.sector}</td>
-                  <td className="px-4 py-3 text-xs text-slate-500">{s.mcap}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      {/* Top Compounders — Tier 4 + Tier 5 */}
+      {(() => {
+        const topTier = stocks.filter(s => s.score >= 4).sort((a, b) => b.score - a.score || b.ret1y - a.ret1y);
+        return (
+          <div className="metric-card overflow-hidden">
+            <div className="flex items-center gap-2 px-5 py-4 border-b border-slate-100 dark:border-slate-800">
+              <TrendingUp className="w-4 h-4 text-emerald-500" />
+              <h2 className="font-bold text-slate-900 dark:text-slate-100">Top Tier Compounders</h2>
+              <span className="badge-green">{topTier.length}</span>
+              <span className="text-xs text-slate-400 dark:text-slate-500">Tier 4 + 5</span>
+            </div>
+            {topTier.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-10 text-slate-400">
+                <TrendingUp className="w-8 h-8 mb-2" />
+                <p className="text-sm font-medium">No Tier 4+ stocks currently</p>
+                <p className="text-xs mt-1">Market may be in correction — structural filters are strict</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-100 dark:border-slate-800">
+                      {['Ticker', 'Tier', 'Price', '6M Ret', '1Y Ret', '3Y Ret', 'RSI', 'Sector'].map(h => (
+                        <th key={h} className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-900/50">
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
+                    {topTier.map(s => (
+                      <tr key={s.ticker} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer"
+                        onClick={() => { onSelectTicker(s.ticker); onNavigateToTearSheet(); }}>
+                        <td className="px-4 py-3 font-bold font-mono">{s.ticker}</td>
+                        <td className="px-4 py-3"><RatingBadge rating={s.rating} /></td>
+                        <td className="px-4 py-3 font-mono">{fmtINRDecimals(s.price)}</td>
+                        <td className={`px-4 py-3 font-mono font-bold ${s.ret6m >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                          {fmtPct(s.ret6m)}
+                        </td>
+                        <td className={`px-4 py-3 font-mono font-bold ${s.ret1y >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                          {fmtPct(s.ret1y)}
+                        </td>
+                        <td className={`px-4 py-3 font-mono font-bold ${!isNaN(s.ret3y) && s.ret3y >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400'}`}>
+                          {isNaN(s.ret3y) ? '—' : fmtPct(s.ret3y)}
+                        </td>
+                        <td className="px-4 py-3 font-mono text-sm">{fmtNum(s.rsi, 1)}</td>
+                        <td className="px-4 py-3 text-xs text-slate-500">{s.sector}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }
