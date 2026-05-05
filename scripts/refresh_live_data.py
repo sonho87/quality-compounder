@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 """
-refresh_live_data.py
-====================
-Daily data refresh script for Quant Terminal V8.0
-Run this every morning AFTER logging into Kite MCP via Claude.
+refresh_live_data.py (React Backend Generator)
+==============================================
+100% Parity with momentum_app_v2.py
+- Uses Kite for fast historical price data.
+- Uses yfinance + curl_cffi for Fundamental data (ROE, Profit Growth, P/E).
+- Uses pure Pandas for exact RSI, ATR, and Drawdown calculations.
 """
 
 import json, math, os, sys, datetime
+import pandas as pd
+import numpy as np
+import yfinance as yf
+from curl_cffi import requests as curl_requests
 
 # ─── CONFIGURATION ──────────────────────────────────────────────────────────
 CLAUDE_PROJECTS_BASE = os.path.expanduser(
@@ -16,80 +22,99 @@ OUTPUT_TS = os.path.join(os.path.dirname(__file__), '..', 'src', 'lib', 'liveDat
 CAPITAL = 33000
 
 INSTRUMENTS = {
-    738561:  "RELIANCE", 2953217: "TCS", 408065:  "INFY", 341249:  "HDFCBANK",
-    81153:   "BAJFINANCE", 969473:  "WIPRO", 1270529: "ICICIBANK", 779521:  "SBIN",
-    3861249: "ADANIPORTS", 857857:  "SUNPHARMA", 897537:  "TITAN", 60417:   "ASIANPAINT",
-    2815745: "MARUTI", 4598529: "NESTLEIND", 356865:  "HINDUNILVR", 2939649: "LT",
+    738561: "RELIANCE", 2953217: "TCS", 408065: "INFY", 341249: "HDFCBANK",
+    81153: "BAJFINANCE", 969473: "WIPRO", 1270529: "ICICIBANK", 779521: "SBIN",
+    3861249: "ADANIPORTS", 857857: "SUNPHARMA", 897537: "TITAN", 60417: "ASIANPAINT",
+    2815745: "MARUTI", 4598529: "NESTLEIND", 356865: "HINDUNILVR", 2939649: "LT",
     5215745: "COALINDIA", 3834113: "POWERGRID", 2977281: "NTPC",
 }
 
-SECTORS = {
-    "RELIANCE":"Energy", "TCS":"Technology", "INFY":"Technology",
-    "HDFCBANK":"Financial Services", "BAJFINANCE":"Financial Services",
-    "WIPRO":"Technology", "ICICIBANK":"Financial Services", "SBIN":"Financial Services",
-    "ADANIPORTS":"Infrastructure", "SUNPHARMA":"Pharmaceuticals",
-    "TITAN":"Consumer Goods", "ASIANPAINT":"Chemicals", "MARUTI":"Automobile",
-    "NESTLEIND":"Consumer Goods", "HINDUNILVR":"Consumer Goods",
-    "LT":"Infrastructure", "COALINDIA":"Energy", "POWERGRID":"Utilities", "NTPC":"Utilities",
-}
+# --- ANTI-BLOCKING BROWSER SPOOFER (From V4) ---
+yf_session = curl_requests.Session(impersonate="chrome")
 
-# ─── STRICT V4/V7 INDICATOR FUNCTIONS ───────────────────────────────────────
+# ─── EXACT V4 PANDAS INDICATOR MATH ─────────────────────────────────────────
 
-def calc_rsi(closes, period=14):
-    gains, losses = [], []
-    for i in range(1, len(closes)):
-        d = closes[i] - closes[i-1]
-        gains.append(max(d, 0))
-        losses.append(max(-d, 0))
-    avg_g = sum(gains[:period]) / period
-    avg_l = sum(losses[:period]) / period
-    for i in range(period, len(gains)):
-        avg_g = (avg_g * (period-1) + gains[i]) / period
-        avg_l = (avg_l * (period-1) + losses[i]) / period
-    return 100.0 if avg_l == 0 else 100 - 100 / (1 + avg_g / avg_l)
+def calc_rsi(series, period=14):
+    delta = series.diff()
+    gain = (delta.where(delta > 0, 0)).fillna(0)
+    loss = (-delta.where(delta < 0, 0)).fillna(0)
+    avg_gain = gain.rolling(window=period, min_periods=period).mean()
+    avg_loss = loss.rolling(window=period, min_periods=period).mean()
+    rs = avg_gain / avg_loss
+    return 100 - (100 / (1 + rs))
 
-def calc_atr(bars, period=14):
-    trs = []
-    for i, b in enumerate(bars):
-        pc = bars[i-1]['close'] if i > 0 else b['close']
-        trs.append(max(b['high'] - b['low'], abs(b['high'] - pc), abs(b['low'] - pc)))
-    return sum(trs[-period:]) / period
+def calc_atr(df_ticker, period=14):
+    tr = np.maximum(df_ticker['High'] - df_ticker['Low'],
+         np.maximum(abs(df_ticker['High'] - df_ticker['Close'].shift()),
+                    abs(df_ticker['Low'] - df_ticker['Close'].shift())))
+    return tr.rolling(period).mean()
 
-# FIX: Added exact 25% Drawdown Rule and fixed MA math
-def detect_structural(closes, highs):
-    if len(closes) < 250:
+def detect_structural_strength(close_series):
+    if len(close_series) < 250:
         return False
-    ma50  = sum(closes[-50:]) / 50
-    ma200 = sum(closes[-200:]) / 200
     
-    current_price = closes[-1]
-    rolling_1yr_high = max(highs[-252:])
-    drawdown = (current_price / rolling_1yr_high) - 1
+    one_year = close_series.tail(250)
+    ma_50 = one_year.rolling(50).mean().iloc[-1]
+    ma_200 = one_year.rolling(200).mean().iloc[-1]
+    current_close = one_year.iloc[-1]
     
-    trend_intact = (current_price > ma200) and (ma50 > ma200)
-    limited_drawdown = drawdown >= -0.25  # Max 25% drop allowed
+    trend_intact = (current_close > ma_200) and (ma_50 > ma_200)
+    
+    rolling_max = one_year.expanding().max()
+    drawdown = (one_year / rolling_max) - 1
+    max_dd = drawdown.min()
+    limited_drawdown = max_dd > -0.25  
     
     return trend_intact and limited_drawdown
 
-# FIX: Added 3-Year Return tracking for Monopoly tier
-def classify_compounder(ret6m, ret1y, ret3y, structural):
-    if not structural:
-        return "🔴 CHOPPY", 0
-    if ret3y is not None and ret3y >= 1.50:
-        return "👑 MONOPOLY/DUOPOLY", 5
-    if ret1y is not None and ret1y >= 0.40:
-        return "🟢 QUALITY COMPOUNDER", 4
-    if ret6m is not None and ret6m >= 0.30:
-        return "🔵 MOMENTUM PLAY", 2
+# ─── EXACT V4 FUNDAMENTALS LOGIC ────────────────────────────────────────────
+
+def safe_get_fundamentals(full_ticker):
+    fundamentals = {"pe": None, "roe": None, "profit_growth": None, "consistent_growth": False, "missing": True, "mcap": "N/A"}
+    try:
+        tkr = yf.Ticker(full_ticker, session=yf_session)
+        info = tkr.info
+        if info:
+            if 'trailingPE' in info: fundamentals["pe"] = info['trailingPE']
+            if 'returnOnEquity' in info: fundamentals["roe"] = info['returnOnEquity']
+            mcap = info.get('marketCap', 0)
+            if mcap > 0: fundamentals["mcap"] = f"₹{mcap / 10000000:.0f} Cr"
+                
+        q_fin = tkr.quarterly_financials
+        if q_fin is not None and not q_fin.empty:
+            target_row = None
+            for alias in ['Net Income', 'Net Income Common Stockholders', 'Net Income Continuous Operations']:
+                if alias in q_fin.index:
+                    target_row = alias
+                    break
+            
+            if target_row:
+                ni = q_fin.loc[target_row].dropna()
+                if len(ni) >= 3:
+                    growth_rates = [(ni.iloc[j] / ni.iloc[j+1]) - 1 for j in range(min(3, len(ni)-1)) if ni.iloc[j+1] != 0]
+                    if len(growth_rates) >= 2:
+                        fundamentals["profit_growth"] = growth_rates[0]
+                        fundamentals["consistent_growth"] = sum(1 for g in growth_rates if g > 0) >= 2
+                        
+        fundamentals["missing"] = False
+    except Exception:
+        pass
+    return fundamentals
+
+def classify_compounder(ret_6m, ret_1y, ret_3y, structural, consistent_growth, roe, missing_fundamentals):
+    if not structural: return "🔴 CHOPPY", 0
+    if missing_fundamentals: return "⚠️ DATA BLOCKED (Manual Verify)", 3 
+    if (pd.notna(ret_3y) and ret_3y >= 1.50 and consistent_growth and pd.notna(roe) and roe > 0.15): return "👑 MONOPOLY/DUOPOLY", 5
+    if (pd.notna(ret_1y) and ret_1y >= 0.40 and consistent_growth): return "🟢 QUALITY COMPOUNDER", 4
+    if (pd.notna(ret_6m) and ret_6m >= 0.30 and consistent_growth): return "🟡 EMERGING WINNER", 3
+    if pd.notna(ret_6m) and ret_6m >= 0.30: return "🔵 MOMENTUM PLAY", 2
     return "🔴 WEAK RETURNS", 0
 
-# ─── FIND LATEST KITE MCP FILES ─────────────────────────────────────────────
+# ─── DATA FETCHING ──────────────────────────────────────────────────────────
 
 def find_latest_files():
     token_to_file = {}
-    if not os.path.exists(CLAUDE_PROJECTS_BASE):
-        return {}
-        
+    if not os.path.exists(CLAUDE_PROJECTS_BASE): return {}
     for session_dir in os.listdir(CLAUDE_PROJECTS_BASE):
         tool_dir = os.path.join(CLAUDE_PROJECTS_BASE, session_dir, 'tool-results')
         if not os.path.isdir(tool_dir): continue
@@ -97,13 +122,12 @@ def find_latest_files():
             if not fname.startswith('mcp-kite-get_historical_data-'): continue
             fpath = os.path.join(tool_dir, fname)
             try:
-                raw  = json.load(open(fpath))
+                raw = json.load(open(fpath))
                 bars = json.loads(raw[0]['text'])
                 if not bars: continue
                 mtime = os.path.getmtime(fpath)
                 token_to_file[fpath] = (mtime, bars)
-            except Exception:
-                continue
+            except Exception: continue
     return token_to_file
 
 def match_files_to_tickers(all_files, instruments):
@@ -113,7 +137,6 @@ def match_files_to_tickers(all_files, instruments):
     for fpath, (mtime, bars) in sorted_files:
         session = os.path.dirname(fpath)
         sessions.setdefault(session, []).append((mtime, fpath, bars))
-
     for session, files in sorted(sessions.items(), key=lambda x: max(f[0] for f in x[1]), reverse=True):
         files_sorted = sorted(files, key=lambda x: x[0]) 
         ticker_list = list(instruments.values())
@@ -121,96 +144,78 @@ def match_files_to_tickers(all_files, instruments):
             for i, ticker in enumerate(ticker_list):
                 if i < len(files_sorted):
                     matched[ticker] = files_sorted[i][2]
-            if matched:
-                print(f"✓ Found {len(matched)} stocks in session: {os.path.basename(session)}")
-                return matched
+            if matched: return matched
     return matched
 
-# ─── MAIN ───────────────────────────────────────────────────────────────────
+# ─── MAIN ENGINE ────────────────────────────────────────────────────────────
 
 def generate_live_data():
-    print("🔍 Scanning for Kite MCP data files...")
     all_files = find_latest_files()
-    
     ticker_bars = match_files_to_tickers(all_files, INSTRUMENTS)
     if not ticker_bars:
-        print("❌ No matching files found. Please fetch data via Kite MCP first.")
+        print("❌ No matching Kite data found.")
         sys.exit(1)
 
     stocks = []
-    print("\n📊 Running Strict V8.0 Screener on live data...")
-    print(f"{'TICKER':15s} {'PRICE':>9s}  {'RSI':>6s}  {'1Y RET':>8s}  {'RATING':25s}  V4")
-    print("─" * 85)
+    print("\n📊 Running 100% Parity V4 Screener on live data...")
 
     for ticker, bars in ticker_bars.items():
-        if len(bars) < 252:
-            print(f"⚠️  {ticker}: only {len(bars)} bars — skipping (needs 252+)")
-            continue
-
-        closes  = [b['close']  for b in bars]
-        highs   = [b['high']   for b in bars]
-        lows    = [b['low']    for b in bars]
-        volumes = [b['volume'] for b in bars]
-
-        price      = closes[-1]
-        prev_close = closes[-2]
-        pct_change = price / prev_close - 1
-        avg_vol20  = sum(volumes[-20:]) / 20
-        traded_val = (avg_vol20 * price) / 100000
-        high52w    = max(highs[-252:])
-        rsi        = calc_rsi(closes, 14)
-        atr        = calc_atr(bars, 14)
+        if len(bars) < 252: continue
         
-        imm_res    = max(highs[-20:])
-        maj_res    = max(highs[-250:])
-        sup_zone   = min(lows[-20:])
-        breakdown  = min(lows[-50:])
+        # 1. Convert Kite JSON to Pandas DataFrame for exact math matching
+        df = pd.DataFrame(bars)
         
-        # Returns math
-        ret6m = (price / closes[-130] - 1) if len(closes) >= 130 else None
-        ret1y = (price / closes[-250] - 1) if len(closes) >= 250 else None
-        ret3y = (price / closes[-700] - 1) if len(closes) >= 700 else None
-
-        # Structural & Scoring
-        structural = detect_structural(closes, highs)
-        rating, score = classify_compounder(ret6m, ret1y, ret3y, structural)
+        current_price = df['close'].iloc[-1]
+        prev_close = df['close'].iloc[-2]
+        pct_change = (current_price / prev_close) - 1
         
-        # FIX: Complete V4 Signal Rules 
-        is_breakout  = price >= (high52w * 0.95)
-        is_vol_surge = max(volumes[-3:]) >= (1.5 * avg_vol20)
-        is_momentum  = 50 <= rsi <= 75
-        is_liquid    = traded_val >= 50       # Rule 1: Min 50 Lakhs
-        is_quality   = score >= 4             # Rule 5: Tier 4 or 5 only
+        avg_vol_20 = df['volume'].tail(20).mean()
+        traded_val_lakhs = (avg_vol_20 * current_price) / 100000
         
-        v4 = is_breakout and is_vol_surge and is_momentum and is_liquid and is_quality
+        high52 = df['high'].tail(252).max()
+        rsi = calc_rsi(df['close'], 14).iloc[-1]
+        current_atr = calc_atr(df, 14).iloc[-1]
+        
+        ret_6m = (current_price / df['close'].iloc[-130] - 1) if len(df) >= 130 else None
+        ret_1y = (current_price / df['close'].iloc[-250] - 1) if len(df) >= 250 else None
+        ret_3y = (current_price / df['close'].iloc[0] - 1) if len(df) >= 700 else None
+        
+        # 2. Get Fundamentals from Yahoo via Stealth Session
+        fund = safe_get_fundamentals(f"{ticker}.NS")
+        structural = detect_structural_strength(df['close'])
+        
+        # 3. Exact Classifier from V4
+        rating, score = classify_compounder(ret_6m, ret_1y, ret_3y, structural, fund['consistent_growth'], fund['roe'], fund['missing'])
+        
+        # 4. Strict V4 Signal Rules
+        is_breakout = current_price >= (high52 * 0.95)
+        is_vol_surge = df['volume'].tail(3).max() >= (1.5 * avg_vol_20)
+        is_rsi_valid = 50 <= rsi <= 75
+        is_liquid = traded_val_lakhs >= 50
+        is_quality = (score >= 4) or fund['missing']
+        
+        v4_signal = is_breakout and is_vol_surge and is_rsi_valid and is_liquid and is_quality
 
-        # Risk Management Math
-        smart_entry = price * 1.005
-        stop_pct    = max(0.03, min(0.06, (1.5 * atr) / price))
-        stop        = price * (1 - stop_pct)
-        t1          = price + (1.5 * atr)
-        t2          = price + (3.0 * atr)
-        shares      = int(CAPITAL / price)
+        # 5. Position Sizing
+        smart_entry = current_price * 1.005
+        stop_pct = max(0.03, min(0.06, (1.5 * current_atr) / current_price))
+        stop = current_price * (1 - stop_pct)
+        t1 = current_price + (1.5 * current_atr)
+        t2 = current_price + (3.0 * current_atr)
+        shares = int(CAPITAL / current_price)
 
-        stocks.append(dict(
-            ticker=ticker, fullTicker=f"{ticker}.NS", rating=rating, score=score,
-            v4Signal=v4, price=round(price, 2), change=round(pct_change, 6),
-            rsi=round(rsi, 2), tradedVal=round(traded_val, 1),
-            ret6m=round(ret6m or 0, 6), ret1y=round(ret1y or 0, 6),
-            entry=round(smart_entry, 2), target1=round(t1, 2), target2=round(t2, 2), stop=round(stop, 2),
-            shares=shares, investment=round(shares * price, 2),
-            immRes=round(imm_res, 2), majRes=round(maj_res, 2),
-            supZone=round(sup_zone, 2), breakdown=round(breakdown, 2),
-            structural=structural, atr=round(atr, 2),
-            sector=SECTORS.get(ticker, 'N/A'),
-        ))
-
-        v4_str = "⚡ YES" if v4 else "—"
-        display_ret1y = ret1y if ret1y is not None else 0
-        print(f"{ticker:15s} ₹{price:>9.2f}  {rsi:6.1f}  {display_ret1y:+7.1%}  {rating:25s}  {v4_str}")
-
-    v4_count = sum(1 for s in stocks if s['v4Signal'])
-    print(f"\n📈 Results: {len(stocks)} stocks screened · {v4_count} Active V4 Signals")
+        stocks.append({
+            "ticker": ticker, "fullTicker": f"{ticker}.NS", "rating": rating, "score": score,
+            "v4Signal": v4_signal, "price": round(current_price, 2), "change": round(pct_change, 6),
+            "rsi": round(rsi, 2), "tradedVal": round(traded_val_lakhs, 1),
+            "ret6m": round(ret_6m or 0, 6), "ret1y": round(ret_1y or 0, 6),
+            "entry": round(smart_entry, 2), "target1": round(t1, 2), "target2": round(t2, 2), "stop": round(stop, 2),
+            "shares": shares, "investment": round(shares * current_price, 2),
+            "immRes": round(df['high'].tail(20).max(), 2), "majRes": round(df['high'].tail(250).max(), 2),
+            "supZone": round(df['low'].tail(20).min(), 2), "breakdown": round(df['low'].tail(50).min(), 2),
+            "structural": structural, "atr": round(current_atr, 2),
+            "mcap": fund['mcap'], "pe": fund['pe'], "roe": fund['roe']
+        })
 
     # ── Write TypeScript file for React Frontend ───────────────────────────
     now = datetime.datetime.now().strftime('%d %b %Y, %H:%M IST')
@@ -219,24 +224,20 @@ def generate_live_data():
     lines = [
         "import type { StockResult, MarketIndex } from './types';",
         "",
-        "// AUTO-GENERATED — Kite API live data",
-        f"// Fetched: {now}  |  Formula: Strict V8 Master Logic",
+        "// AUTO-GENERATED — Kite API + yFinance Fundamentals",
+        f"// Fetched: {now}  |  Formula: 100% Parity V4 Master Logic",
         "// DO NOT edit manually — re-run: python3 scripts/refresh_live_data.py",
         "",
         f"export const LIVE_FETCH_TIME = '{now}';",
-        "",
-        "export const LIVE_INDICES: MarketIndex[] = [",
-        "  { name: 'NIFTY 50',   price: 24751.65, change:  0.0043, symbol: '^NSEI' },",
-        "  { name: 'BANK NIFTY', price: 53421.80, change: -0.0012, symbol: '^NSEBANK' },",
-        "  { name: 'NIFTY IT',   price: 38964.20, change:  0.0127, symbol: '^CNXIT' },",
-        "  { name: 'NIFTY MID',  price: 52831.40, change:  0.0218, symbol: '^NSEMDCP50' },",
-        "];",
         "",
         "export const LIVE_STOCKS: StockResult[] = [",
     ]
 
     for s in stocks:
         r = s['rating'].replace("'", "\\'")
+        pe_val = s['pe'] if pd.notna(s['pe']) else "null"
+        roe_val = s['roe'] if pd.notna(s['roe']) else "null"
+        
         lines += [
             "  {",
             f"    ticker: '{s['ticker']}', fullTicker: '{s['fullTicker']}',",
@@ -248,7 +249,7 @@ def generate_live_data():
             f"    shares: {s['shares']}, investment: {s['investment']},",
             f"    immRes: {s['immRes']}, majRes: {s['majRes']}, supZone: {s['supZone']}, breakdown: {s['breakdown']},",
             f"    structural: {jb(s['structural'])}, atr: {s['atr']},",
-            f"    sector: '{s['sector']}', mcap: 'N/A', pe: null, roe: null, bookVal: 'N/A', divYield: 'N/A',",
+            f"    sector: 'N/A', mcap: '{s['mcap']}', pe: {pe_val}, roe: {roe_val}, bookVal: 'N/A', divYield: 'N/A',",
             "  },",
         ]
 
@@ -262,9 +263,7 @@ def generate_live_data():
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, 'w') as f:
         f.write('\n'.join(lines) + '\n')
-    print(f"\n✅ Written safely to React frontend: {out_path}")
-
-    return v4_count
+    print(f"\n✅ Data generated and written safely to React frontend: {out_path}")
 
 if __name__ == '__main__':
-    v4_count = generate_live_data()
+    generate_live_data()
