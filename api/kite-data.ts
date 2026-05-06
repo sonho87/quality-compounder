@@ -1,10 +1,10 @@
 // api/kite-data.ts
 // Vercel serverless function — fetches 3yr daily OHLCV for all 19 NSE stocks
-// from the Kite Connect API and runs the full V4 screening algorithm.
+// from the Kite Connect API and runs the full V8.4 screening algorithm.
 //
 // Called by the frontend: GET /api/kite-data?access_token=XXX&capital=33000
 //
-// The screening logic below is an exact port of momentum_app_v2.py.
+// The screening logic below is an exact port of V8.4 momentum_app_v2.py.
 // DO NOT change any formula — only fetch/response logic may be modified.
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
@@ -42,25 +42,34 @@ interface Bar {
   volume: number;
 }
 
-// ─── INDICATOR FUNCTIONS (strict port of V4 Breakout Swing System spec) ─────
+// ─── V8.4 Rating type ────────────────────────────────────────────────────────
+type Rating =
+  | '👑 TIER 1: MONOPOLY'
+  | '🟢 TIER 2: QUALITY'
+  | '⚠️ TIER 2: PROVISIONAL (Missing Data)'
+  | '🟡 TIER 3: EMERGING'
+  | '🔵 TIER 4: MOMENTUM'
+  | '🔴 TIER 5: CHOPPY'
+  | '🔴 TIER 5: WEAK';
 
+// ─── INDICATOR FUNCTIONS (strict port of V8.4 momentum_app_v2.py) ──────────
+
+// V8.4 RSI: Simple rolling mean (SMA), NOT Wilder smoothing
 function calcRSI(closes: number[], period = 14): number {
   if (closes.length < period + 1) return NaN;
+  // Use the last `period` deltas (simple rolling window)
+  const len = closes.length;
   let gains = 0, losses = 0;
-  for (let i = 1; i <= period; i++) {
+  for (let i = len - period; i < len; i++) {
     const d = closes[i] - closes[i - 1];
     if (d > 0) gains += d; else losses -= d;
   }
-  let avgG = gains / period;
-  let avgL = losses / period;
-  for (let i = period + 1; i < closes.length; i++) {
-    const d = closes[i] - closes[i - 1];
-    avgG = (avgG * (period - 1) + Math.max(d, 0)) / period;
-    avgL = (avgL * (period - 1) + Math.max(-d, 0)) / period;
-  }
+  const avgG = gains / period;
+  const avgL = losses / period;
   return avgL === 0 ? 100 : 100 - 100 / (1 + avgG / avgL);
 }
 
+// V8.4 ATR: Simple rolling mean
 function calcATR(bars: Bar[], period = 14): number {
   const trs = bars.map((b, i) => {
     if (i === 0) return b.high - b.low;
@@ -70,23 +79,19 @@ function calcATR(bars: Bar[], period = 14): number {
   return trs.slice(-period).reduce((a, b) => a + b, 0) / period;
 }
 
-// Structural Strength — exact port of momentum_app_v2.py detect_structural_strength()
-// (a) Quarterly rising highs: 250 bars split into 4 quarters (~62 bars each).
-//     Each quarter's max close must be >= the prior quarter's max close.
-// (b) Max drawdown from rolling high (closes only) must be > -25%.
-// Both conditions required. Highs param kept for API compat but not used.
-function detectStructural(closes: number[], _highs: number[]): boolean {
+// V8.4 Structural Strength — MA crossovers + drawdown (NOT quarterly rising highs)
+function detectStructural(closes: number[]): boolean {
   if (closes.length < 250) return false;
   const oneYear = closes.slice(-250);
 
-  // (a) Quarterly rising highs
-  const q1 = Math.max(...oneYear.slice(0, 62));
-  const q2 = Math.max(...oneYear.slice(62, 125));
-  const q3 = Math.max(...oneYear.slice(125, 187));
-  const q4 = Math.max(...oneYear.slice(187));
-  if (!(q2 >= q1 && q3 >= q2 && q4 >= q3)) return false;
+  // (a) Trend intact: MA50 > MA200 AND current close > MA200
+  const ma50 = oneYear.slice(-50).reduce((a, b) => a + b, 0) / 50;
+  const ma200 = oneYear.slice(-200).reduce((a, b) => a + b, 0) / 200;
+  const currentClose = oneYear[oneYear.length - 1];
 
-  // (b) Max drawdown from rolling high
+  if (!(currentClose > ma200 && ma50 > ma200)) return false;
+
+  // (b) Max drawdown from expanding max must be > -25%
   let rollingMax = -Infinity;
   let maxDrawdown = 0;
   for (const price of oneYear) {
@@ -97,36 +102,33 @@ function detectStructural(closes: number[], _highs: number[]): boolean {
   return maxDrawdown > -0.25;
 }
 
-type Rating =
-  | '🏆 MONOPOLY/DUOPOLY'
-  | '🟢 QUALITY COMPOUNDER'
-  | '🌱 EMERGING WINNER'
-  | '🔵 MOMENTUM PLAY'
-  | '🔴 CHOPPY'
-  | '🔴 WEAK RETURNS';
-
-// 5-tier classification. consistentGrowth/roe = null → bypass (OHLCV-only mode)
+// V8.4 classify_compounder — with missing_fundamentals → PROVISIONAL
 function classifyCompounder(
   ret6m: number, ret1y: number, ret3y: number,
   structural: boolean,
   consistentGrowth: boolean | null = null,
-  roe: number | null = null
+  roe: number | null = null,
+  missingFundamentals: boolean = false
 ): { rating: Rating; score: number } {
-  if (!structural) return { rating: '🔴 CHOPPY', score: 0 };
+  if (!structural) return { rating: '🔴 TIER 5: CHOPPY', score: 0 };
+
+  if (missingFundamentals) return { rating: '⚠️ TIER 2: PROVISIONAL (Missing Data)', score: 4 };
+
   const growthOk = consistentGrowth === null || consistentGrowth;
-  const roeOk    = roe === null || roe > 15;
+  const roeOk    = roe === null || roe > 0.15;
+
   if (!isNaN(ret3y) && ret3y >= 1.50 && growthOk && roeOk)
-    return { rating: '🏆 MONOPOLY/DUOPOLY', score: 5 };
+    return { rating: '👑 TIER 1: MONOPOLY', score: 5 };
   if (!isNaN(ret1y) && ret1y >= 0.40 && growthOk)
-    return { rating: '🟢 QUALITY COMPOUNDER', score: 4 };
+    return { rating: '🟢 TIER 2: QUALITY', score: 4 };
   if (!isNaN(ret6m) && ret6m >= 0.30 && growthOk)
-    return { rating: '🌱 EMERGING WINNER', score: 3 };
+    return { rating: '🟡 TIER 3: EMERGING', score: 3 };
   if (!isNaN(ret6m) && ret6m >= 0.30)
-    return { rating: '🔵 MOMENTUM PLAY', score: 2 };
-  return { rating: '🔴 WEAK RETURNS', score: 0 };
+    return { rating: '🔵 TIER 4: MOMENTUM', score: 2 };
+  return { rating: '🔴 TIER 5: WEAK', score: 0 };
 }
 
-// V4 Signal — ALL 5 rules must pass
+// V8.4 V4 Signal — ALL 5 rules must pass, RSI INCLUSIVE
 function calcV4(
   price: number, high52w: number, volumes: number[],
   rsi: number, tradedVal: number, score: number
@@ -135,8 +137,8 @@ function calcV4(
   if (price < high52w * 0.95) return false;                 // Rule 2: Proximity
   const avgVol20 = volumes.slice(-20).reduce((a, b) => a + b, 0) / 20;
   if (Math.max(...volumes.slice(-3)) < 1.5 * avgVol20) return false; // Rule 3: Volume
-  if (rsi <= 50 || rsi >= 75) return false;                 // Rule 4: RSI strictly (50,75)
-  if (score < 4) return false;                              // Rule 5: Tier 4 or 5
+  if (rsi < 50 || rsi > 75) return false;                  // Rule 4: RSI 50 <= rsi <= 75 (INCLUSIVE)
+  if (score < 4) return false;                              // Rule 5: Score >= 4 (includes PROVISIONAL)
   return true;
 }
 
@@ -157,13 +159,16 @@ function screenStock(ticker: string, sector: string, bars: Bar[], capital: numbe
   const high52w   = Math.max(...highs.slice(-252));
   const rsi       = calcRSI(closes, 14);
   const atr       = calcATR(bars, 14);
-  const structural = detectStructural(closes, highs);
+  const structural = detectStructural(closes);
 
   const ret6m = price / closes[closes.length - 130] - 1;
   const ret1y = price / closes[closes.length - 250] - 1;
   const ret3y = bars.length >= 700 ? price / closes[closes.length - 700] - 1 : NaN;
 
-  const { rating, score } = classifyCompounder(ret6m, ret1y, ret3y, structural);
+  // Kite OHLCV-only mode = missing fundamentals → PROVISIONAL if structural passes
+  const { rating, score } = classifyCompounder(
+    ret6m, ret1y, ret3y, structural, null, null, true
+  );
   const v4Signal = calcV4(price, high52w, volumes, rsi, tradedVal, score);
 
   const stopPct  = Math.max(0.03, Math.min(0.06, (1.5 * atr) / price));

@@ -27,10 +27,10 @@ export default function ScreenerTab({ stocks, portfolio, onAddToPortfolio, onSel
   const filtered = useMemo(() => {
     let list = [...stocks];
     if (filter === 'v4')       list = list.filter(s => s.v4Signal);
-    else if (filter === 'tier5')   list = list.filter(s => s.rating === '🏆 MONOPOLY/DUOPOLY');
-    else if (filter === 'quality') list = list.filter(s => s.rating === '🟢 QUALITY COMPOUNDER');
-    else if (filter === 'emerging') list = list.filter(s => s.rating === '🌱 EMERGING WINNER');
-    else if (filter === 'momentum') list = list.filter(s => s.rating === '🔵 MOMENTUM PLAY');
+    else if (filter === 'tier5')   list = list.filter(s => s.rating === '👑 TIER 1: MONOPOLY');
+    else if (filter === 'quality') list = list.filter(s => s.rating === '🟢 TIER 2: QUALITY' || s.rating === '⚠️ TIER 2: PROVISIONAL (Missing Data)');
+    else if (filter === 'emerging') list = list.filter(s => s.rating === '🟡 TIER 3: EMERGING');
+    else if (filter === 'momentum') list = list.filter(s => s.rating === '🔵 TIER 4: MOMENTUM');
     if (search) list = list.filter(s => s.ticker.toLowerCase().includes(search.toLowerCase()));
     list.sort((a, b) => {
       const av = a[sortKey] as number | string | boolean;
@@ -60,10 +60,10 @@ export default function ScreenerTab({ stocks, portfolio, onAddToPortfolio, onSel
   const FILTERS: { key: FilterMode; label: string; count: number }[] = [
     { key: 'all',      label: 'All Stocks',       count: stocks.length },
     { key: 'v4',       label: '⚡ V4 Signals',    count: stocks.filter(s => s.v4Signal).length },
-    { key: 'tier5',    label: '🏆 Monopoly',       count: stocks.filter(s => s.rating === '🏆 MONOPOLY/DUOPOLY').length },
-    { key: 'quality',  label: '🟢 Quality',        count: stocks.filter(s => s.rating === '🟢 QUALITY COMPOUNDER').length },
-    { key: 'emerging', label: '🌱 Emerging',       count: stocks.filter(s => s.rating === '🌱 EMERGING WINNER').length },
-    { key: 'momentum', label: '🔵 Momentum',       count: stocks.filter(s => s.rating === '🔵 MOMENTUM PLAY').length },
+    { key: 'tier5',    label: '👑 Monopoly',       count: stocks.filter(s => s.rating === '👑 TIER 1: MONOPOLY').length },
+    { key: 'quality',  label: '🟢 Quality',        count: stocks.filter(s => s.rating === '🟢 TIER 2: QUALITY' || s.rating === '⚠️ TIER 2: PROVISIONAL (Missing Data)').length },
+    { key: 'emerging', label: '🟡 Emerging',       count: stocks.filter(s => s.rating === '🟡 TIER 3: EMERGING').length },
+    { key: 'momentum', label: '🔵 Momentum',       count: stocks.filter(s => s.rating === '🔵 TIER 4: MOMENTUM').length },
   ];
 
   return (
@@ -205,32 +205,32 @@ export default function ScreenerTab({ stocks, portfolio, onAddToPortfolio, onSel
 
       {/* Legend */}
       <div className="metric-card p-4">
-        <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-3">V4 Breakout Swing System — Classification Legend</p>
+        <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-3">V8.4 Quant Terminal — Classification Legend</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-xs mb-3">
           <div className="p-3 bg-yellow-50 dark:bg-yellow-950/20 rounded-lg border border-yellow-200 dark:border-yellow-900">
-            <p className="font-bold text-yellow-700 dark:text-yellow-400 mb-1">🏆 Tier 5 — Monopoly/Duopoly</p>
-            <p className="text-yellow-600 dark:text-yellow-500">Structural + 3Y Return ≥ 150% + ROE &gt; 15%</p>
+            <p className="font-bold text-yellow-700 dark:text-yellow-400 mb-1">👑 Tier 1 — Monopoly</p>
+            <p className="text-yellow-600 dark:text-yellow-500">Structural + 3Y Return ≥ 150% + ROE &gt; 15% + Growth</p>
           </div>
           <div className="p-3 bg-emerald-50 dark:bg-emerald-950/20 rounded-lg border border-emerald-100 dark:border-emerald-900">
-            <p className="font-bold text-emerald-700 dark:text-emerald-400 mb-1">🟢 Tier 4 — Quality Compounder</p>
-            <p className="text-emerald-600 dark:text-emerald-500">Structural + 1Y Return ≥ 40%</p>
+            <p className="font-bold text-emerald-700 dark:text-emerald-400 mb-1">🟢 Tier 2 — Quality</p>
+            <p className="text-emerald-600 dark:text-emerald-500">Structural + 1Y Return ≥ 40% + Consistent Growth</p>
           </div>
           <div className="p-3 bg-teal-50 dark:bg-teal-950/20 rounded-lg border border-teal-100 dark:border-teal-900">
-            <p className="font-bold text-teal-700 dark:text-teal-400 mb-1">🌱 Tier 3 — Emerging Winner</p>
-            <p className="text-teal-600 dark:text-teal-500">Structural + 6M Return ≥ 30%</p>
+            <p className="font-bold text-teal-700 dark:text-teal-400 mb-1">🟡 Tier 3 — Emerging</p>
+            <p className="text-teal-600 dark:text-teal-500">Structural + 6M Return ≥ 30% + Consistent Growth</p>
           </div>
           <div className="p-3 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-100 dark:border-blue-900">
-            <p className="font-bold text-blue-700 dark:text-blue-400 mb-1">🔵 Tier 2 — Momentum Play</p>
-            <p className="text-blue-600 dark:text-blue-500">6M Return ≥ 30% (structural not required)</p>
+            <p className="font-bold text-blue-700 dark:text-blue-400 mb-1">🔵 Tier 4 — Momentum</p>
+            <p className="text-blue-600 dark:text-blue-500">6M Return ≥ 30% (no growth/fundamental req)</p>
           </div>
           <div className="p-3 bg-red-50 dark:bg-red-950/20 rounded-lg border border-red-100 dark:border-red-900">
-            <p className="font-bold text-red-700 dark:text-red-400 mb-1">🔴 Tier 0 — Choppy/Weak</p>
+            <p className="font-bold text-red-700 dark:text-red-400 mb-1">🔴 Tier 5 — Choppy/Weak</p>
             <p className="text-red-600 dark:text-red-500">Fails structural filter or returns below thresholds</p>
           </div>
           <div className="p-3 bg-amber-50 dark:bg-amber-950/20 rounded-lg border border-amber-100 dark:border-amber-900">
             <p className="font-bold text-amber-700 dark:text-amber-400 mb-1">⚡ V4 Breakout Signal (5 Rules)</p>
             <p className="text-amber-600 dark:text-amber-500">
-              Liquidity ≥ ₹50L · Price ≥ 95% of 52w High · Vol surge 1.5× · RSI (50,75) · Tier 4+
+              Liquidity ≥ ₹50L · Price ≥ 95% of 52w High · Vol surge 1.5× · RSI 50-75 · Score ≥ 4
             </p>
           </div>
         </div>

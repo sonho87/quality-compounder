@@ -63,34 +63,31 @@ def calc_atr(df_ticker, period=14):
     return tr.rolling(period).mean()
 
 def detect_structural_strength(df):
-    """Structural Strength — exact port of momentum_app_v2.py detect_structural_strength().
+    """Structural Strength — V8.4 detect_structural_strength().
 
     TWO conditions must BOTH pass (over last 250 trading days = 1 year):
 
-    (a) QUARTERLY RISING HIGHS: split 250 bars into 4 quarters (~62 bars each).
-        Each quarter's max close must be >= the prior quarter's max close.
-        Confirms a sustained, consistently-rising price structure.
+    (a) TREND INTACT: MA50 > MA200  AND  current close > MA200
+        Uses simple moving averages computed over the 1-year window.
 
-    (b) LIMITED DRAWDOWN: max drawdown from rolling high (closes only) > -25%.
-        Confirms no catastrophic peak-to-trough collapse within the year.
+    (b) LIMITED DRAWDOWN: max drawdown from expanding max (closes only) > -25%.
 
-    Uses close prices for both checks — matches the original formula exactly.
+    This is the V8.4 formula — uses MA crossovers, NOT quarterly rising highs.
     """
     if len(df) < 250:
         return False
 
     one_year = df['close'].tail(250)
 
-    # (a) Quarterly rising highs — 4 quarters x ~62 bars each
-    q1 = one_year.iloc[:62].max()
-    q2 = one_year.iloc[62:125].max()
-    q3 = one_year.iloc[125:187].max()
-    q4 = one_year.iloc[187:].max()
-    quarters_rising = (q2 >= q1) and (q3 >= q2) and (q4 >= q3)
-    if not quarters_rising:
+    # (a) Trend intact: MA50 > MA200 AND current close > MA200
+    ma_50 = one_year.rolling(50).mean().iloc[-1]
+    ma_200 = one_year.rolling(200).mean().iloc[-1]
+    current_close = one_year.iloc[-1]
+    trend_intact = (current_close > ma_200) and (ma_50 > ma_200)
+    if not trend_intact:
         return False
 
-    # (b) Max drawdown from rolling high (closes only)
+    # (b) Max drawdown from expanding max (closes only)
     rolling_max = one_year.expanding().max()
     drawdown    = (one_year / rolling_max) - 1
     max_dd      = drawdown.min()
@@ -138,34 +135,39 @@ def safe_get_fundamentals(full_ticker):
     return fundamentals
 
 def classify_compounder(ret_6m, ret_1y, ret_3y, structural,
-                        consistent_growth=None, roe=None):
-    """5-tier classification (V4 spec §4).
+                        consistent_growth=None, roe=None, missing_fundamentals=False):
+    """V8.4 classify_compounder — 5-tier classification.
+    missing_fundamentals=True → PROVISIONAL score 4 (pure technical breakouts aren't hidden).
     consistent_growth / roe = None → bypass (OHLCV-only mode).
     ROE from yfinance is a fraction (e.g. 0.213), spec threshold is >15% = 0.15."""
     if not structural:
-        return "🔴 CHOPPY", 0
+        return "🔴 TIER 5: CHOPPY", 0
+
+    # PROVISIONAL: missing fundamentals get score 4 so they can pass V4 quality check
+    if missing_fundamentals:
+        return "⚠️ TIER 2: PROVISIONAL (Missing Data)", 4
 
     # When data is unavailable, bypass the condition (treat as satisfied)
     growth_ok = consistent_growth is None or consistent_growth
     roe_ok    = roe is None or (pd.notna(roe) and roe > 0.15)
 
-    # Tier 5: Monopoly / Duopoly
+    # Tier 1: Monopoly
     if pd.notna(ret_3y) and ret_3y >= 1.50 and growth_ok and roe_ok:
-        return "🏆 MONOPOLY/DUOPOLY", 5
+        return "👑 TIER 1: MONOPOLY", 5
 
-    # Tier 4: Quality Compounder
+    # Tier 2: Quality
     if pd.notna(ret_1y) and ret_1y >= 0.40 and growth_ok:
-        return "🟢 QUALITY COMPOUNDER", 4
+        return "🟢 TIER 2: QUALITY", 4
 
-    # Tier 3: Emerging Winner
+    # Tier 3: Emerging
     if pd.notna(ret_6m) and ret_6m >= 0.30 and growth_ok:
-        return "🌱 EMERGING WINNER", 3
+        return "🟡 TIER 3: EMERGING", 3
 
-    # Tier 2: Momentum Play (ignores growth/fundamentals)
+    # Tier 4: Momentum (ignores growth/fundamentals)
     if pd.notna(ret_6m) and ret_6m >= 0.30:
-        return "🔵 MOMENTUM PLAY", 2
+        return "🔵 TIER 4: MOMENTUM", 2
 
-    return "🔴 WEAK RETURNS", 0
+    return "🔴 TIER 5: WEAK", 0
 
 # ─── DATA FETCHING ──────────────────────────────────────────────────────────
 
@@ -253,13 +255,14 @@ def generate_live_data():
         # 5-tier classification
         rating, score = classify_compounder(
             ret_6m, ret_1y, ret_3y, structural,
-            fund['consistent_growth'], fund['roe']
+            fund['consistent_growth'], fund['roe'],
+            missing_fundamentals=fund['missing']
         )
 
         # V4 Signal — ALL 5 rules must pass (spec §5)
         is_breakout  = current_price >= (high52 * 0.95)             # Rule 2: Proximity
         is_vol_surge = df['volume'].tail(3).max() >= (1.5 * avg_vol_20)  # Rule 3: Volume surge
-        is_rsi_valid = 50 < rsi < 75                                # Rule 4: RSI strictly (50,75)
+        is_rsi_valid = 50 <= rsi <= 75                               # Rule 4: RSI 50<=rsi<=75 (INCLUSIVE, V8.4)
         is_liquid    = traded_val_lakhs >= 50                       # Rule 1: Liquidity
         is_quality   = score >= 4                                   # Rule 5: Tier 4 or 5
 
@@ -305,10 +308,10 @@ def generate_live_data():
         print(f"{ticker:15s} ₹{current_price:>9.2f}  {rsi:6.1f}  {ret1_str:>8s}  {rating:25s}  {v4_str}")
 
     v4_count = sum(1 for s in stocks if s['v4Signal'])
-    monopoly = sum(1 for s in stocks if s['rating'] == '🏆 MONOPOLY/DUOPOLY')
-    quality  = sum(1 for s in stocks if s['rating'] == '🟢 QUALITY COMPOUNDER')
-    emerging = sum(1 for s in stocks if s['rating'] == '🌱 EMERGING WINNER')
-    momentum = sum(1 for s in stocks if s['rating'] == '🔵 MOMENTUM PLAY')
+    monopoly = sum(1 for s in stocks if s['rating'] == '👑 TIER 1: MONOPOLY')
+    quality  = sum(1 for s in stocks if s['rating'] == '🟢 TIER 2: QUALITY')
+    emerging = sum(1 for s in stocks if s['rating'] == '🟡 TIER 3: EMERGING')
+    momentum = sum(1 for s in stocks if s['rating'] == '🔵 TIER 4: MOMENTUM')
     print(f"\n📈 Results: {len(stocks)} stocks · {monopoly} Monopoly · {quality} Quality · {emerging} Emerging · {momentum} Momentum · {v4_count} V4 signals")
 
     # ── Write TypeScript file for React Frontend ──────────────────────────
@@ -320,7 +323,7 @@ def generate_live_data():
         "import type { StockResult, MarketIndex } from './types';",
         "",
         "// AUTO-GENERATED — Kite API + yFinance Fundamentals",
-        f"// Fetched: {now}  |  V4 Breakout Swing System: 5-tier, drawdown filter, RSI strictly (50,75)",
+        f"// Fetched: {now}  |  V8.4 Quant Terminal: 5-tier, MA crossover structural, RSI 50<=rsi<=75",
         "// DO NOT edit manually — re-run: python3 scripts/refresh_live_data.py",
         "",
         f"export const LIVE_FETCH_TIME = '{now}';",

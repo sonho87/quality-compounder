@@ -7,15 +7,15 @@ export interface OHLCV {
   volume: number;
 }
 
-// Tier 5 = Monopoly/Duopoly, Tier 4 = Quality Compounder,
-// Tier 3 = Emerging Winner, Tier 2 = Momentum Play, Tier 0 = Choppy/Weak
+// V8.4 Tier Classification — matches momentum_app_v2.py classify_compounder() exactly
 export type Rating =
-  | '🏆 MONOPOLY/DUOPOLY'   // Tier 5: 3Y ≥ 150% + Structural + ROE > 15%
-  | '🟢 QUALITY COMPOUNDER' // Tier 4: 1Y ≥ 40% + Structural
-  | '🌱 EMERGING WINNER'    // Tier 3: 6M ≥ 30% + Structural
-  | '🔵 MOMENTUM PLAY'      // Tier 2: 6M ≥ 30% (no structural req)
-  | '🔴 CHOPPY'             // Tier 0: fails structural strength filter
-  | '🔴 WEAK RETURNS';      // Tier 0: structural OK but returns too low
+  | '👑 TIER 1: MONOPOLY'                    // Score 5: 3Y ≥ 150% + Structural + ROE > 15% + Consistent Growth
+  | '🟢 TIER 2: QUALITY'                     // Score 4: 1Y ≥ 40% + Structural + Consistent Growth
+  | '⚠️ TIER 2: PROVISIONAL (Missing Data)'  // Score 4: Structural OK but fundamentals unavailable
+  | '🟡 TIER 3: EMERGING'                    // Score 3: 6M ≥ 30% + Structural + Consistent Growth
+  | '🔵 TIER 4: MOMENTUM'                    // Score 2: 6M ≥ 30% (no growth/fundamental req)
+  | '🔴 TIER 5: CHOPPY'                      // Score 0: fails structural strength filter
+  | '🔴 TIER 5: WEAK';                       // Score 0: structural OK but returns too low
 
 export interface StockResult {
   ticker: string;

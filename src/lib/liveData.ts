@@ -16,7 +16,7 @@ export const LIVE_INDICES: MarketIndex[] = [
 export const LIVE_STOCKS: StockResult[] = [
   {
     ticker: 'RELIANCE', fullTicker: 'RELIANCE.NS',
-    rating: '🔴 CHOPPY' as const, score: 0,
+    rating: '🔴 TIER 5: CHOPPY' as const, score: 0,
     v4Signal: false, price: 1461.1, change: -0.001367,
     rsi: 65.59, tradedVal: 331886.0,
     ret6m: 0.008768, ret1y: 0.027208, ret3y: 0,
@@ -29,7 +29,7 @@ export const LIVE_STOCKS: StockResult[] = [
   },
   {
     ticker: 'TCS', fullTicker: 'TCS.NS',
-    rating: '🔴 CHOPPY' as const, score: 0,
+    rating: '🔴 TIER 5: CHOPPY' as const, score: 0,
     v4Signal: false, price: 2421.8, change: -0.003907,
     rsi: 41.36, tradedVal: 101038.8,
     ret6m: -0.211961, ret1y: -0.296949, ret3y: 0,
@@ -42,7 +42,7 @@ export const LIVE_STOCKS: StockResult[] = [
   },
   {
     ticker: 'INFY', fullTicker: 'INFY.NS',
-    rating: '🔴 CHOPPY' as const, score: 0,
+    rating: '🔴 TIER 5: CHOPPY' as const, score: 0,
     v4Signal: false, price: 1172.0, change: 0.003081,
     rsi: 35.16, tradedVal: 169115.2,
     ret6m: -0.233235, ret1y: -0.222193, ret3y: 0,
@@ -55,7 +55,7 @@ export const LIVE_STOCKS: StockResult[] = [
   },
   {
     ticker: 'HDFCBANK', fullTicker: 'HDFCBANK.NS',
-    rating: '🔴 CHOPPY' as const, score: 0,
+    rating: '🔴 TIER 5: CHOPPY' as const, score: 0,
     v4Signal: false, price: 774.1, change: -0.0068,
     rsi: 42.54, tradedVal: 315007.2,
     ret6m: -0.232653, ret1y: -0.19574, ret3y: 0,
@@ -68,7 +68,7 @@ export const LIVE_STOCKS: StockResult[] = [
   },
   {
     ticker: 'BAJFINANCE', fullTicker: 'BAJFINANCE.NS',
-    rating: '🔴 CHOPPY' as const, score: 0,
+    rating: '🔴 TIER 5: CHOPPY' as const, score: 0,
     v4Signal: false, price: 955.45, change: 0.005525,
     rsi: 61.96, tradedVal: 87826.2,
     ret6m: -0.126765, ret1y: 0.078386, ret3y: 0,
@@ -81,7 +81,7 @@ export const LIVE_STOCKS: StockResult[] = [
   },
   {
     ticker: 'WIPRO', fullTicker: 'WIPRO.NS',
-    rating: '🔴 CHOPPY' as const, score: 0,
+    rating: '🔴 TIER 5: CHOPPY' as const, score: 0,
     v4Signal: false, price: 200.0, change: -0.003736,
     rsi: 47.06, tradedVal: 54480.6,
     ret6m: -0.160193, ret1y: -0.155227, ret3y: 0,
@@ -94,7 +94,7 @@ export const LIVE_STOCKS: StockResult[] = [
   },
   {
     ticker: 'ICICIBANK', fullTicker: 'ICICIBANK.NS',
-    rating: '🔴 CHOPPY' as const, score: 0,
+    rating: '🔴 TIER 5: CHOPPY' as const, score: 0,
     v4Signal: false, price: 1252.9, change: -0.014086,
     rsi: 39.04, tradedVal: 240415.3,
     ret6m: -0.08125, ret1y: -0.125314, ret3y: 0,
@@ -107,7 +107,7 @@ export const LIVE_STOCKS: StockResult[] = [
   },
   {
     ticker: 'SBIN', fullTicker: 'SBIN.NS',
-    rating: '🔴 CHOPPY' as const, score: 0,
+    rating: '🔴 TIER 5: CHOPPY' as const, score: 0,
     v4Signal: false, price: 1065.4, change: -0.002808,
     rsi: 45.82, tradedVal: 178911.8,
     ret6m: 0.168778, ret1y: 0.33175, ret3y: 0,
@@ -120,7 +120,7 @@ export const LIVE_STOCKS: StockResult[] = [
   },
   {
     ticker: 'ADANIPORTS', fullTicker: 'ADANIPORTS.NS',
-    rating: '🔴 CHOPPY' as const, score: 0,
+    rating: '🔴 TIER 5: CHOPPY' as const, score: 0,
     v4Signal: false, price: 1735.6, change: -0.004017,
     rsi: 76.46, tradedVal: 69630.4,
     ret6m: 0.194412, ret1y: 0.369742, ret3y: 0,
@@ -133,7 +133,7 @@ export const LIVE_STOCKS: StockResult[] = [
   },
   {
     ticker: 'SUNPHARMA', fullTicker: 'SUNPHARMA.NS',
-    rating: '🔴 CHOPPY' as const, score: 0,
+    rating: '🔴 TIER 5: CHOPPY' as const, score: 0,
     v4Signal: false, price: 1816.2, change: -0.004003,
     rsi: 63.22, tradedVal: 111063.0,
     ret6m: 0.074738, ret1y: -0.007215, ret3y: 0,
@@ -146,7 +146,7 @@ export const LIVE_STOCKS: StockResult[] = [
   },
   {
     ticker: 'TITAN', fullTicker: 'TITAN.NS',
-    rating: '🔴 CHOPPY' as const, score: 0,
+    rating: '🔴 TIER 5: CHOPPY' as const, score: 0,
     v4Signal: false, price: 4367.7, change: 0.001077,
     rsi: 51.21, tradedVal: 51622.0,
     ret6m: 0.157835, ret1y: 0.307303, ret3y: 0,
@@ -159,7 +159,7 @@ export const LIVE_STOCKS: StockResult[] = [
   },
   {
     ticker: 'ASIANPAINT', fullTicker: 'ASIANPAINT.NS',
-    rating: '🔴 CHOPPY' as const, score: 0,
+    rating: '🔴 TIER 5: CHOPPY' as const, score: 0,
     v4Signal: false, price: 2426.8, change: -0.008701,
     rsi: 53.38, tradedVal: 32194.1,
     ret6m: -0.030211, ret1y: 0.007055, ret3y: 0,
@@ -172,7 +172,7 @@ export const LIVE_STOCKS: StockResult[] = [
   },
   {
     ticker: 'MARUTI', fullTicker: 'MARUTI.NS',
-    rating: '🔴 CHOPPY' as const, score: 0,
+    rating: '🔴 TIER 5: CHOPPY' as const, score: 0,
     v4Signal: false, price: 13473.0, change: -0.007879,
     rsi: 53.18, tradedVal: 77856.1,
     ret6m: -0.178125, ret1y: 0.086007, ret3y: 0,
@@ -185,7 +185,7 @@ export const LIVE_STOCKS: StockResult[] = [
   },
   {
     ticker: 'NESTLEIND', fullTicker: 'NESTLEIND.NS',
-    rating: '🔴 CHOPPY' as const, score: 0,
+    rating: '🔴 TIER 5: CHOPPY' as const, score: 0,
     v4Signal: false, price: 1475.7, change: 0.012765,
     rsi: 80.68, tradedVal: 38136.4,
     ret6m: 0.159412, ret1y: 0.262577, ret3y: 0,
@@ -198,7 +198,7 @@ export const LIVE_STOCKS: StockResult[] = [
   },
   {
     ticker: 'HINDUNILVR', fullTicker: 'HINDUNILVR.NS',
-    rating: '🔴 CHOPPY' as const, score: 0,
+    rating: '🔴 TIER 5: CHOPPY' as const, score: 0,
     v4Signal: false, price: 2317.1, change: 0.003378,
     rsi: 58.5, tradedVal: 57044.7,
     ret6m: -0.109356, ret1y: -0.002926, ret3y: 0,
@@ -211,7 +211,7 @@ export const LIVE_STOCKS: StockResult[] = [
   },
   {
     ticker: 'LT', fullTicker: 'LT.NS',
-    rating: '🔴 CHOPPY' as const, score: 0,
+    rating: '🔴 TIER 5: CHOPPY' as const, score: 0,
     v4Signal: false, price: 4053.8, change: -0.011461,
     rsi: 55.42, tradedVal: 130049.4,
     ret6m: 0.034476, ret1y: 0.21743, ret3y: 0,
@@ -224,7 +224,7 @@ export const LIVE_STOCKS: StockResult[] = [
   },
   {
     ticker: 'COALINDIA', fullTicker: 'COALINDIA.NS',
-    rating: '🔴 CHOPPY' as const, score: 0,
+    rating: '🔴 TIER 5: CHOPPY' as const, score: 0,
     v4Signal: false, price: 472.15, change: -0.016252,
     rsi: 61.18, tradedVal: 61876.4,
     ret6m: 0.235025, ret1y: 0.26159, ret3y: 0,
@@ -237,7 +237,7 @@ export const LIVE_STOCKS: StockResult[] = [
   },
   {
     ticker: 'POWERGRID', fullTicker: 'POWERGRID.NS',
-    rating: '🔴 CHOPPY' as const, score: 0,
+    rating: '🔴 TIER 5: CHOPPY' as const, score: 0,
     v4Signal: false, price: 320.7, change: 0.005172,
     rsi: 65.78, tradedVal: 36658.6,
     ret6m: 0.107198, ret1y: 0.055108, ret3y: 0,
@@ -250,7 +250,7 @@ export const LIVE_STOCKS: StockResult[] = [
   },
   {
     ticker: 'NTPC', fullTicker: 'NTPC.NS',
-    rating: '🔴 CHOPPY' as const, score: 0,
+    rating: '🔴 TIER 5: CHOPPY' as const, score: 0,
     v4Signal: false, price: 399.2, change: -0.002125,
     rsi: 57.93, tradedVal: 45467.9,
     ret6m: 0.165037, ret1y: 0.145645, ret3y: 0,

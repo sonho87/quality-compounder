@@ -7,16 +7,18 @@ export const MOCK_INDICES: MarketIndex[] = [
   { name: 'NIFTY MID', price: 52831.40, change: 0.0218, symbol: '^NSEMDCP50' },
 ];
 
-// Tier 5 — 🏆 MONOPOLY/DUOPOLY: structural=true, ret3y ≥ 150%, growthOk, roeOk
-// Tier 4 — 🟢 QUALITY COMPOUNDER: structural=true, ret1y ≥ 40%, growthOk
-// Tier 3 — 🌱 EMERGING WINNER: structural=true, ret6m ≥ 30%, growthOk (ret1y < 40%)
-// Tier 0 — 🔴 CHOPPY: structural=false
-// Tier 0 — 🔴 WEAK RETURNS: structural=true, returns too low
+// V8.4 Tier Classification:
+// Tier 1 — 👑 MONOPOLY: structural + ret3y ≥ 150% + ROE > 15% + Consistent Growth
+// Tier 2 — 🟢 QUALITY: structural + ret1y ≥ 40% + Consistent Growth
+// Tier 2 — ⚠️ PROVISIONAL: structural + missing fundamentals (score 4)
+// Tier 3 — 🟡 EMERGING: structural + ret6m ≥ 30% + Consistent Growth
+// Tier 4 — 🔵 MOMENTUM: ret6m ≥ 30% (no growth req)
+// Tier 5 — 🔴 CHOPPY: fails structural | 🔴 WEAK: structural OK but low returns
 
 export const MOCK_STOCKS: StockResult[] = [
-  // ── Tier 5: MONOPOLY/DUOPOLY ──────────────────────────────────────────────
+  // ── Tier 1: MONOPOLY ──────────────────────────────────────────────────────
   {
-    ticker: 'BAJFINANCE', fullTicker: 'BAJFINANCE.NS', rating: '🏆 MONOPOLY/DUOPOLY', score: 5,
+    ticker: 'BAJFINANCE', fullTicker: 'BAJFINANCE.NS', rating: '👑 TIER 1: MONOPOLY', score: 5,
     v4Signal: true, price: 7341.20, change: 0.0201, rsi: 68.4, tradedVal: 680,
     ret6m: 0.38, ret1y: 0.62, ret3y: 1.72,
     target1: 7548.90, target2: 7963.45, stop: 6974.14,
@@ -26,7 +28,7 @@ export const MOCK_STOCKS: StockResult[] = [
     sector: 'Financial Services', mcap: '₹4,45,120 Cr', pe: 34.7, roe: 21.3, bookVal: '₹1,247', divYield: '0.27%',
   },
   {
-    ticker: 'TITAN', fullTicker: 'TITAN.NS', rating: '🏆 MONOPOLY/DUOPOLY', score: 5,
+    ticker: 'TITAN', fullTicker: 'TITAN.NS', rating: '👑 TIER 1: MONOPOLY', score: 5,
     v4Signal: true, price: 3421.75, change: 0.0143, rsi: 65.7, tradedVal: 320,
     ret6m: 0.35, ret1y: 0.52, ret3y: 1.89,
     target1: 3510.20, target2: 3687.10, stop: 3250.66,
@@ -36,9 +38,9 @@ export const MOCK_STOCKS: StockResult[] = [
     sector: 'Consumer Goods', mcap: '₹3,03,920 Cr', pe: 88.4, roe: 34.7, bookVal: '₹189', divYield: '0.38%',
   },
 
-  // ── Tier 4: QUALITY COMPOUNDER ────────────────────────────────────────────
+  // ── Tier 2: QUALITY ───────────────────────────────────────────────────────
   {
-    ticker: 'RELIANCE', fullTicker: 'RELIANCE.NS', rating: '🟢 QUALITY COMPOUNDER', score: 4,
+    ticker: 'RELIANCE', fullTicker: 'RELIANCE.NS', rating: '🟢 TIER 2: QUALITY', score: 4,
     v4Signal: true, price: 2847.35, change: 0.0082, rsi: 64.2, tradedVal: 1240,
     ret6m: 0.18, ret1y: 0.44, ret3y: 0.45,
     target1: 2923.80, target2: 3076.50, stop: 2705.00,
@@ -48,7 +50,7 @@ export const MOCK_STOCKS: StockResult[] = [
     sector: 'Energy', mcap: '₹19,28,450 Cr', pe: 24.3, roe: 8.9, bookVal: '₹1,247', divYield: '0.38%',
   },
   {
-    ticker: 'TCS', fullTicker: 'TCS.NS', rating: '🟢 QUALITY COMPOUNDER', score: 4,
+    ticker: 'TCS', fullTicker: 'TCS.NS', rating: '🟢 TIER 2: QUALITY', score: 4,
     v4Signal: true, price: 3952.10, change: 0.0154, rsi: 61.8, tradedVal: 890,
     ret6m: 0.22, ret1y: 0.51, ret3y: 0.60,
     target1: 4031.45, target2: 4189.90, stop: 3754.50,
@@ -58,7 +60,7 @@ export const MOCK_STOCKS: StockResult[] = [
     sector: 'Technology', mcap: '₹14,31,290 Cr', pe: 30.1, roe: 49.1, bookVal: '₹387', divYield: '1.49%',
   },
   {
-    ticker: 'HDFCBANK', fullTicker: 'HDFCBANK.NS', rating: '🟢 QUALITY COMPOUNDER', score: 4,
+    ticker: 'HDFCBANK', fullTicker: 'HDFCBANK.NS', rating: '🟢 TIER 2: QUALITY', score: 4,
     v4Signal: true, price: 1784.75, change: 0.0067, rsi: 58.9, tradedVal: 1560,
     ret6m: 0.26, ret1y: 0.43, ret3y: 0.35,
     target1: 1829.10, target2: 1917.80, stop: 1695.50,
@@ -68,7 +70,7 @@ export const MOCK_STOCKS: StockResult[] = [
     sector: 'Financial Services', mcap: '₹13,55,870 Cr', pe: 18.4, roe: 16.8, bookVal: '₹587', divYield: '1.12%',
   },
   {
-    ticker: 'ICICIBANK', fullTicker: 'ICICIBANK.NS', rating: '🟢 QUALITY COMPOUNDER', score: 4,
+    ticker: 'ICICIBANK', fullTicker: 'ICICIBANK.NS', rating: '🟢 TIER 2: QUALITY', score: 4,
     v4Signal: true, price: 1312.60, change: 0.0093, rsi: 62.5, tradedVal: 1890,
     ret6m: 0.29, ret1y: 0.47, ret3y: 0.95,
     target1: 1347.35, target2: 1417.05, stop: 1247.00,
@@ -78,7 +80,7 @@ export const MOCK_STOCKS: StockResult[] = [
     sector: 'Financial Services', mcap: '₹9,24,310 Cr', pe: 19.8, roe: 18.1, bookVal: '₹374', divYield: '0.76%',
   },
   {
-    ticker: 'ADANIPORTS', fullTicker: 'ADANIPORTS.NS', rating: '🟢 QUALITY COMPOUNDER', score: 4,
+    ticker: 'ADANIPORTS', fullTicker: 'ADANIPORTS.NS', rating: '🟢 TIER 2: QUALITY', score: 4,
     v4Signal: true, price: 1384.95, change: 0.0187, rsi: 71.3, tradedVal: 540,
     ret6m: 0.42, ret1y: 0.58, ret3y: 1.20,
     target1: 1432.80, target2: 1528.50, stop: 1315.70,
@@ -88,7 +90,7 @@ export const MOCK_STOCKS: StockResult[] = [
     sector: 'Infrastructure', mcap: '₹2,99,870 Cr', pe: 28.4, roe: 16.2, bookVal: '₹312', divYield: '0.29%',
   },
   {
-    ticker: 'SUNPHARMA', fullTicker: 'SUNPHARMA.NS', rating: '🟢 QUALITY COMPOUNDER', score: 4,
+    ticker: 'SUNPHARMA', fullTicker: 'SUNPHARMA.NS', rating: '🟢 TIER 2: QUALITY', score: 4,
     v4Signal: false, price: 1741.30, change: 0.0054, rsi: 56.8, tradedVal: 480,
     ret6m: 0.21, ret1y: 0.45, ret3y: 0.70,
     target1: 1784.70, target2: 1871.45, stop: 1654.24,
@@ -98,7 +100,7 @@ export const MOCK_STOCKS: StockResult[] = [
     sector: 'Pharmaceuticals', mcap: '₹4,17,680 Cr', pe: 38.2, roe: 19.8, bookVal: '₹249', divYield: '0.69%',
   },
   {
-    ticker: 'MARUTI', fullTicker: 'MARUTI.NS', rating: '🟢 QUALITY COMPOUNDER', score: 4,
+    ticker: 'MARUTI', fullTicker: 'MARUTI.NS', rating: '🟢 TIER 2: QUALITY', score: 4,
     v4Signal: true, price: 12847.00, change: 0.0076, rsi: 60.3, tradedVal: 420,
     ret6m: 0.24, ret1y: 0.41, ret3y: 0.55,
     target1: 13168.55, target2: 13811.10, stop: 12204.65,
@@ -108,7 +110,7 @@ export const MOCK_STOCKS: StockResult[] = [
     sector: 'Automobile', mcap: '₹3,88,540 Cr', pe: 27.8, roe: 19.4, bookVal: '₹2,847', divYield: '0.78%',
   },
   {
-    ticker: 'LT', fullTicker: 'LT.NS', rating: '🟢 QUALITY COMPOUNDER', score: 4,
+    ticker: 'LT', fullTicker: 'LT.NS', rating: '🟢 TIER 2: QUALITY', score: 4,
     v4Signal: false, price: 3618.90, change: 0.0108, rsi: 57.4, tradedVal: 560,
     ret6m: 0.27, ret1y: 0.48, ret3y: 0.85,
     target1: 3710.65, target2: 3894.15, stop: 3437.96,
@@ -118,9 +120,9 @@ export const MOCK_STOCKS: StockResult[] = [
     sector: 'Infrastructure', mcap: '₹5,03,820 Cr', pe: 33.7, roe: 14.8, bookVal: '₹734', divYield: '0.83%',
   },
 
-  // ── Tier 3: EMERGING WINNER (structural=true, ret6m ≥ 30%, ret1y < 40%) ───
+  // ── Tier 3: EMERGING (structural=true, ret6m ≥ 30%, ret1y < 40%) ──────────
   {
-    ticker: 'INFY', fullTicker: 'INFY.NS', rating: '🌱 EMERGING WINNER', score: 3,
+    ticker: 'INFY', fullTicker: 'INFY.NS', rating: '🟡 TIER 3: EMERGING', score: 3,
     v4Signal: false, price: 1621.40, change: -0.0031, rsi: 52.4, tradedVal: 720,
     ret6m: 0.31, ret1y: 0.29, ret3y: 0.25,
     target1: 1664.55, target2: 1750.75, stop: 1540.30,
@@ -130,7 +132,7 @@ export const MOCK_STOCKS: StockResult[] = [
     sector: 'Technology', mcap: '₹6,74,210 Cr', pe: 26.8, roe: 32.1, bookVal: '₹196', divYield: '2.41%',
   },
   {
-    ticker: 'TATAMOTORS', fullTicker: 'TATAMOTORS.NS', rating: '🌱 EMERGING WINNER', score: 3,
+    ticker: 'TATAMOTORS', fullTicker: 'TATAMOTORS.NS', rating: '🟡 TIER 3: EMERGING', score: 3,
     v4Signal: false, price: 924.85, change: -0.0124, rsi: 44.1, tradedVal: 980,
     ret6m: 0.34, ret1y: 0.28, ret3y: 0.85,
     target1: 959.40, target2: 1028.50, stop: 878.60,
@@ -140,7 +142,7 @@ export const MOCK_STOCKS: StockResult[] = [
     sector: 'Automobile', mcap: '₹3,03,450 Cr', pe: 8.2, roe: 19.4, bookVal: '₹227', divYield: '0.54%',
   },
   {
-    ticker: 'SBIN', fullTicker: 'SBIN.NS', rating: '🌱 EMERGING WINNER', score: 3,
+    ticker: 'SBIN', fullTicker: 'SBIN.NS', rating: '🟡 TIER 3: EMERGING', score: 3,
     v4Signal: false, price: 782.40, change: -0.0048, rsi: 53.2, tradedVal: 2340,
     ret6m: 0.33, ret1y: 0.37, ret3y: 0.65,
     target1: 804.20, target2: 848.10, stop: 743.30,
@@ -150,7 +152,7 @@ export const MOCK_STOCKS: StockResult[] = [
     sector: 'Financial Services', mcap: '₹6,98,450 Cr', pe: 9.4, roe: 14.1, bookVal: '₹381', divYield: '1.79%',
   },
   {
-    ticker: 'COALINDIA', fullTicker: 'COALINDIA.NS', rating: '🌱 EMERGING WINNER', score: 3,
+    ticker: 'COALINDIA', fullTicker: 'COALINDIA.NS', rating: '🟡 TIER 3: EMERGING', score: 3,
     v4Signal: false, price: 484.75, change: -0.0064, rsi: 51.8, tradedVal: 840,
     ret6m: 0.32, ret1y: 0.26, ret3y: 0.90,
     target1: 497.80, target2: 523.90, stop: 460.51,
@@ -160,7 +162,7 @@ export const MOCK_STOCKS: StockResult[] = [
     sector: 'Energy', mcap: '₹2,98,780 Cr', pe: 7.2, roe: 57.3, bookVal: '₹84', divYield: '5.16%',
   },
   {
-    ticker: 'POWERGRID', fullTicker: 'POWERGRID.NS', rating: '🌱 EMERGING WINNER', score: 3,
+    ticker: 'POWERGRID', fullTicker: 'POWERGRID.NS', rating: '🟡 TIER 3: EMERGING', score: 3,
     v4Signal: false, price: 328.45, change: 0.0038, rsi: 54.3, tradedVal: 760,
     ret6m: 0.31, ret1y: 0.34, ret3y: 0.80,
     target1: 337.60, target2: 355.90, stop: 312.03,
@@ -170,7 +172,7 @@ export const MOCK_STOCKS: StockResult[] = [
     sector: 'Utilities', mcap: '₹3,06,320 Cr', pe: 16.8, roe: 20.7, bookVal: '₹113', divYield: '3.04%',
   },
   {
-    ticker: 'NTPC', fullTicker: 'NTPC.NS', rating: '🌱 EMERGING WINNER', score: 3,
+    ticker: 'NTPC', fullTicker: 'NTPC.NS', rating: '🟡 TIER 3: EMERGING', score: 3,
     v4Signal: false, price: 374.20, change: 0.0117, rsi: 63.8, tradedVal: 1120,
     ret6m: 0.36, ret1y: 0.38, ret3y: 1.05,
     target1: 384.60, target2: 405.40, stop: 355.49,
@@ -182,7 +184,7 @@ export const MOCK_STOCKS: StockResult[] = [
 
   // ── Tier 0: CHOPPY (structural=false) ────────────────────────────────────
   {
-    ticker: 'ASIANPAINT', fullTicker: 'ASIANPAINT.NS', rating: '🔴 CHOPPY', score: 0,
+    ticker: 'ASIANPAINT', fullTicker: 'ASIANPAINT.NS', rating: '🔴 TIER 5: CHOPPY', score: 0,
     v4Signal: false, price: 2318.40, change: -0.0092, rsi: 38.4, tradedVal: 290,
     ret6m: -0.08, ret1y: -0.14, ret3y: -0.15,
     target1: 2378.95, target2: 2500.10, stop: 2202.48,
@@ -192,7 +194,7 @@ export const MOCK_STOCKS: StockResult[] = [
     sector: 'Chemicals', mcap: '₹2,21,960 Cr', pe: 52.1, roe: 28.9, bookVal: '₹143', divYield: '1.06%',
   },
   {
-    ticker: 'NESTLEIND', fullTicker: 'NESTLEIND.NS', rating: '🔴 CHOPPY', score: 0,
+    ticker: 'NESTLEIND', fullTicker: 'NESTLEIND.NS', rating: '🔴 TIER 5: CHOPPY', score: 0,
     v4Signal: false, price: 2241.85, change: -0.0034, rsi: 41.2, tradedVal: 180,
     ret6m: -0.04, ret1y: 0.02, ret3y: 0.10,
     target1: 2297.10, target2: 2407.60, stop: 2129.76,
@@ -202,7 +204,7 @@ export const MOCK_STOCKS: StockResult[] = [
     sector: 'Consumer Goods', mcap: '₹2,15,830 Cr', pe: 72.4, roe: 94.2, bookVal: '₹87', divYield: '1.61%',
   },
   {
-    ticker: 'HINDUNILVR', fullTicker: 'HINDUNILVR.NS', rating: '🔴 CHOPPY', score: 0,
+    ticker: 'HINDUNILVR', fullTicker: 'HINDUNILVR.NS', rating: '🔴 TIER 5: CHOPPY', score: 0,
     v4Signal: false, price: 2387.60, change: 0.0021, rsi: 49.7, tradedVal: 350,
     ret6m: 0.04, ret1y: 0.07, ret3y: 0.05,
     target1: 2448.80, target2: 2571.20, stop: 2268.22,
@@ -212,9 +214,9 @@ export const MOCK_STOCKS: StockResult[] = [
     sector: 'Consumer Goods', mcap: '₹5,60,810 Cr', pe: 54.2, roe: 19.8, bookVal: '₹27', divYield: '1.73%',
   },
 
-  // ── Tier 0: WEAK RETURNS (structural=true but returns too low) ────────────
+  // ── Tier 5: WEAK (structural=true but returns too low) ────────────────────
   {
-    ticker: 'WIPRO', fullTicker: 'WIPRO.NS', rating: '🔴 WEAK RETURNS', score: 0,
+    ticker: 'WIPRO', fullTicker: 'WIPRO.NS', rating: '🔴 TIER 5: WEAK', score: 0,
     v4Signal: false, price: 487.25, change: 0.0018, rsi: 47.8, tradedVal: 420,
     ret6m: 0.08, ret1y: 0.12, ret3y: 0.40,
     target1: 498.80, target2: 521.85, stop: 462.90,
