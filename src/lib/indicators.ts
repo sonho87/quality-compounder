@@ -53,31 +53,39 @@ export function calcATR(bars: OHLCV[], period = 14): number[] {
   return atr;
 }
 
-// ─── 3. STRUCTURAL STRENGTH — all 3 conditions must pass ────────────────────
-// Conditions (over last 250 trading days):
-//   (a) Current Close > SMA 200
-//   (b) SMA 50 > SMA 200
-//   (c) Drawdown from 1-year rolling high > -25%
-//       i.e. Current Price / max(Highs last 250d) - 1 > -0.25
-export function detectStructuralStrength(closes: number[], highs: number[]): boolean {
-  if (closes.length < 250 || highs.length < 250) return false;
+// ─── 3. STRUCTURAL STRENGTH — exact port of momentum_app_v2.py ──────────────
+// Two conditions must BOTH pass (over last 250 trading days = 1 year):
+//
+//   (a) QUARTERLY RISING HIGHS: split 250 bars into 4 quarters (~62 bars each).
+//       Each quarter's max close must be >= the prior quarter's max close.
+//       Confirms a sustained, consistently-rising price structure.
+//
+//   (b) LIMITED DRAWDOWN: max drawdown from rolling high (closes only) > -25%.
+//       Confirms no catastrophic peak-to-trough collapse within the year.
+//
+// NOTE: The original formula uses CLOSES for both quarterly highs and drawdown.
+//       The `highs` parameter is kept for API compatibility but is NOT used.
+export function detectStructuralStrength(closes: number[], _highs?: number[]): boolean {
+  if (closes.length < 250) return false;
 
-  const yearCloses = closes.slice(-250);
-  const yearHighs  = highs.slice(-250);
-  const lastPrice  = yearCloses[yearCloses.length - 1];
+  const oneYear = closes.slice(-250);
 
-  const ma50  = yearCloses.slice(-50).reduce((a, b) => a + b, 0) / 50;
-  const ma200 = closes.slice(-200).reduce((a, b) => a + b, 0) / 200;
+  // (a) Quarterly rising highs — 4 quarters × ~62 bars each
+  const q1 = Math.max(...oneYear.slice(0, 62));
+  const q2 = Math.max(...oneYear.slice(62, 125));
+  const q3 = Math.max(...oneYear.slice(125, 187));
+  const q4 = Math.max(...oneYear.slice(187));
+  if (!(q2 >= q1 && q3 >= q2 && q4 >= q3)) return false;
 
-  // (a) Price above MA200
-  if (lastPrice <= ma200) return false;
-  // (b) Golden cross
-  if (ma50 <= ma200) return false;
-  // (c) Max drawdown from 1-year high ≤ 25%
-  const rollingHigh = Math.max(...yearHighs);
-  if (lastPrice / rollingHigh - 1 <= -0.25) return false;
-
-  return true;
+  // (b) Max drawdown from rolling high must be > -25%
+  let rollingMax = -Infinity;
+  let maxDrawdown = 0;
+  for (const price of oneYear) {
+    if (price > rollingMax) rollingMax = price;
+    const dd = price / rollingMax - 1;
+    if (dd < maxDrawdown) maxDrawdown = dd;
+  }
+  return maxDrawdown > -0.25;
 }
 
 // ─── 4. CLASSIFICATION — 5-tier system ─────────────────────────────────────

@@ -70,20 +70,31 @@ function calcATR(bars: Bar[], period = 14): number {
   return trs.slice(-period).reduce((a, b) => a + b, 0) / period;
 }
 
-// Structural Strength — ALL 3 conditions required:
-// (a) Close > MA200  (b) MA50 > MA200  (c) Drawdown from 1Y high > -25%
-function detectStructural(closes: number[], highs: number[]): boolean {
+// Structural Strength — exact port of momentum_app_v2.py detect_structural_strength()
+// (a) Quarterly rising highs: 250 bars split into 4 quarters (~62 bars each).
+//     Each quarter's max close must be >= the prior quarter's max close.
+// (b) Max drawdown from rolling high (closes only) must be > -25%.
+// Both conditions required. Highs param kept for API compat but not used.
+function detectStructural(closes: number[], _highs: number[]): boolean {
   if (closes.length < 250) return false;
-  const year      = closes.slice(-250);
-  const yearHighs = highs.slice(-250);
-  const last      = year[year.length - 1];
-  const ma50      = year.slice(-50).reduce((a, b) => a + b, 0) / 50;
-  const ma200     = closes.slice(-200).reduce((a, b) => a + b, 0) / 200;
-  if (last <= ma200) return false;
-  if (ma50 <= ma200) return false;
-  const rollingHigh = Math.max(...yearHighs);
-  if (last / rollingHigh - 1 <= -0.25) return false;
-  return true;
+  const oneYear = closes.slice(-250);
+
+  // (a) Quarterly rising highs
+  const q1 = Math.max(...oneYear.slice(0, 62));
+  const q2 = Math.max(...oneYear.slice(62, 125));
+  const q3 = Math.max(...oneYear.slice(125, 187));
+  const q4 = Math.max(...oneYear.slice(187));
+  if (!(q2 >= q1 && q3 >= q2 && q4 >= q3)) return false;
+
+  // (b) Max drawdown from rolling high
+  let rollingMax = -Infinity;
+  let maxDrawdown = 0;
+  for (const price of oneYear) {
+    if (price > rollingMax) rollingMax = price;
+    const dd = price / rollingMax - 1;
+    if (dd < maxDrawdown) maxDrawdown = dd;
+  }
+  return maxDrawdown > -0.25;
 }
 
 type Rating =

@@ -63,32 +63,38 @@ def calc_atr(df_ticker, period=14):
     return tr.rolling(period).mean()
 
 def detect_structural_strength(df):
-    """Structural Strength — ALL 3 conditions required (V4 spec §3):
-    (a) Close > MA200  (b) MA50 > MA200  (c) Drawdown from 1Y high > -25%
+    """Structural Strength — exact port of momentum_app_v2.py detect_structural_strength().
 
-    MA200 = rolling mean of last 200 closes (NOT sum of 250 / 200).
-    Pandas rolling(200).mean() naturally uses last 200 values — correct."""
+    TWO conditions must BOTH pass (over last 250 trading days = 1 year):
+
+    (a) QUARTERLY RISING HIGHS: split 250 bars into 4 quarters (~62 bars each).
+        Each quarter's max close must be >= the prior quarter's max close.
+        Confirms a sustained, consistently-rising price structure.
+
+    (b) LIMITED DRAWDOWN: max drawdown from rolling high (closes only) > -25%.
+        Confirms no catastrophic peak-to-trough collapse within the year.
+
+    Uses close prices for both checks — matches the original formula exactly.
+    """
     if len(df) < 250:
         return False
 
     one_year = df['close'].tail(250)
-    # SMA-200: last 200 closes only (rolling mean of window=200)
-    ma_200 = one_year.rolling(200).mean().iloc[-1]
-    ma_50  = one_year.rolling(50).mean().iloc[-1]
-    current_close = one_year.iloc[-1]
 
-    # (a) Price above MA200
-    if current_close <= ma_200:
-        return False
-    # (b) Golden cross: MA50 > MA200
-    if ma_50 <= ma_200:
-        return False
-    # (c) Drawdown from 1Y high must be > -25%
-    rolling_max = df['high'].tail(250).max()
-    if current_close / rolling_max - 1 <= -0.25:
+    # (a) Quarterly rising highs — 4 quarters x ~62 bars each
+    q1 = one_year.iloc[:62].max()
+    q2 = one_year.iloc[62:125].max()
+    q3 = one_year.iloc[125:187].max()
+    q4 = one_year.iloc[187:].max()
+    quarters_rising = (q2 >= q1) and (q3 >= q2) and (q4 >= q3)
+    if not quarters_rising:
         return False
 
-    return True
+    # (b) Max drawdown from rolling high (closes only)
+    rolling_max = one_year.expanding().max()
+    drawdown    = (one_year / rolling_max) - 1
+    max_dd      = drawdown.min()
+    return max_dd > -0.25
 
 # ─── EXACT V4 FUNDAMENTALS LOGIC ────────────────────────────────────────────
 
