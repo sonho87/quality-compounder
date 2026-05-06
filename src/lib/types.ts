@@ -85,6 +85,7 @@ export interface AppSettings {
   dhanClientId: string;
   dhanAccessToken: string;
   kiteApiKey: string;
+  kiteApiSecret: string;
   kiteAccessToken: string;
   kiteProxyUrl: string;
   geminiApiKey: string;

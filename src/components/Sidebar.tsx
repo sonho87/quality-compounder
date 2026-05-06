@@ -151,11 +151,11 @@ export default function Sidebar({ settings, onSettingsChange, onSymbolsLoaded, s
 
           {settings.dataSource === 'kite' && (
             <div className="mt-3 space-y-2 p-3 bg-amber-50 dark:bg-amber-950/30 rounded-lg border border-amber-100 dark:border-amber-900">
-              <p className="text-xs font-bold text-amber-700 dark:text-amber-400">Kite API Config</p>
-              <p className="text-xs text-amber-600 dark:text-amber-500">⚠️ Kite is CORS-blocked. Requires a backend proxy URL.</p>
-              <InputField label="Proxy Server URL" value={settings.kiteProxyUrl} onChange={v => onSettingsChange({ kiteProxyUrl: v })} placeholder="http://localhost:8080" />
-              <InputField label="API Key" value={settings.kiteApiKey} onChange={v => onSettingsChange({ kiteApiKey: v })} placeholder="Enter API Key" />
-              <InputField label="Access Token" type="password" value={settings.kiteAccessToken} onChange={v => onSettingsChange({ kiteAccessToken: v })} placeholder="Enter Access Token" />
+              <p className="text-xs font-bold text-amber-700 dark:text-amber-400">Kite Connect OAuth</p>
+              <p className="text-xs text-amber-600 dark:text-amber-500">Enter your Zerodha app credentials, then click <b>Login with Kite</b> above.</p>
+              <InputField label="API Key" value={settings.kiteApiKey} onChange={v => onSettingsChange({ kiteApiKey: v })} placeholder="abcdefghij" />
+              <InputField label="API Secret" type="password" value={settings.kiteApiSecret ?? ''} onChange={v => onSettingsChange({ kiteApiSecret: v })} placeholder="Enter API Secret" />
+              <p className="text-xs text-amber-500 dark:text-amber-600 pt-1">Get credentials at <span className="font-semibold">kite.zerodha.com/developers</span></p>
             </div>
           )}
         </Section>

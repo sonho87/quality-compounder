@@ -15,11 +15,17 @@ interface Props {
   userName: string;
   onRefresh: () => void;
   onLogout: () => void;
+  kiteApiKey?: string;
+  kiteApiSecret?: string;
 }
 
-export default function KiteLoginBanner({ sessionState, userName, onRefresh, onLogout }: Props) {
+export default function KiteLoginBanner({ sessionState, userName, onRefresh, onLogout, kiteApiKey, kiteApiSecret }: Props) {
   const handleLogin = () => {
-    window.location.href = '/api/kite-login';
+    const params = new URLSearchParams();
+    if (kiteApiKey)    params.set('api_key',    kiteApiKey);
+    if (kiteApiSecret) params.set('api_secret', kiteApiSecret);
+    const qs = params.toString();
+    window.location.href = `/api/kite-login${qs ? '?' + qs : ''}`;
   };
 
   /* ── No session ── */

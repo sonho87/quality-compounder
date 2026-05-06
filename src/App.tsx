@@ -28,6 +28,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   dhanClientId: '',
   dhanAccessToken: '',
   kiteApiKey: '',
+  kiteApiSecret: '',
   kiteAccessToken: '',
   kiteProxyUrl: '',
   geminiApiKey: '',
@@ -46,21 +47,41 @@ export default function App() {
   const { sessionState, userName, stocks: kiteStocks, refresh: kiteRefresh, logout: kiteLogout }
     = useKiteData(settings.capitalPerTrade);
 
-  // Priority: kiteStocks (fresh from API) → LIVE_STOCKS (last saved) → MOCK_STOCKS
-  const baseStocks: StockResult[] =
-    kiteStocks ?? (LIVE_STOCKS.length > 0 ? LIVE_STOCKS : MOCK_STOCKS);
+  // Resolve which stock list to show based on data source priority:
+  //   Kite OAuth (fresh) → Demo (mock) → CSV → LIVE snapshot → mock fallback
+  const getBaseStocks = (): StockResult[] => {
+    if (kiteStocks && kiteStocks.length > 0) return kiteStocks;
+    if (settings.dataSource === 'mock') return MOCK_STOCKS;
+    if (LIVE_STOCKS.length > 0) return LIVE_STOCKS;
+    return MOCK_STOCKS;
+  };
 
-  const [stocks, setStocks] = useState<StockResult[]>(baseStocks);
+  const [stocks, setStocks] = useState<StockResult[]>(getBaseStocks);
   const [portfolio, setPortfolio] = useState<PortfolioPosition[]>([]);
-  const [selectedTicker, setSelectedTicker] = useState(baseStocks[0]?.ticker ?? '');
+  const [selectedTicker, setSelectedTicker] = useState(() => getBaseStocks()[0]?.ticker ?? '');
 
-  // When Kite finishes loading fresh data, adopt it
+  // When Kite OAuth finishes loading, adopt live data
   useEffect(() => {
     if (kiteStocks && kiteStocks.length > 0) {
       setStocks(kiteStocks);
       setSelectedTicker(kiteStocks[0].ticker);
     }
   }, [kiteStocks]);
+
+  // When user switches data source radio button, reset stocks accordingly
+  useEffect(() => {
+    if (kiteStocks && kiteStocks.length > 0) return; // Kite live data always wins
+    if (settings.dataSource === 'mock') {
+      setStocks(MOCK_STOCKS);
+      setSelectedTicker(MOCK_STOCKS[0]?.ticker ?? '');
+    } else if (settings.dataSource === 'kite' || settings.dataSource === 'dhan') {
+      // For API modes, reset to LIVE snapshot while user logs in
+      const base = LIVE_STOCKS.length > 0 ? LIVE_STOCKS : MOCK_STOCKS;
+      setStocks(base);
+      setSelectedTicker(base[0]?.ticker ?? '');
+    }
+    // 'csv' mode: stocks are set by handleSymbolsLoaded, don't reset here
+  }, [settings.dataSource]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const isLiveData = LIVE_STOCKS.length > 0 || sessionState.status === 'ready';
 
@@ -78,8 +99,9 @@ export default function App() {
     // When CSV is uploaded, generate placeholder stock results using mock data as a base
     // In production these would be fetched from Dhan/Kite and evaluated by indicators.ts
     const symbolSet = new Set(symbols.map(s => s.replace('.NS', '').replace('.BO', '')));
-    // Prefer live data (Kite/CSV-generated) over mock data for matching
-    const dataSource = kiteStocks ?? (LIVE_STOCKS.length > 0 ? LIVE_STOCKS : MOCK_STOCKS);
+    // Always match CSV symbols against MOCK_STOCKS (curated, correct tier data)
+    // LIVE_STOCKS has outdated prices and all show CHOPPY — not useful for matching
+    const dataSource = kiteStocks ?? MOCK_STOCKS;
     const matched = dataSource.filter(s => symbolSet.has(s.ticker));
     // For symbols with no data, create placeholder entries
     // No slice limit — show ALL symbols from the CSV
@@ -228,6 +250,8 @@ export default function App() {
               userName={userName}
               onRefresh={kiteRefresh}
               onLogout={kiteLogout}
+              kiteApiKey={settings.kiteApiKey}
+              kiteApiSecret={settings.kiteApiSecret}
             />
 
             {/* Fallback: show last-saved data timestamp if no fresh Kite session */}
