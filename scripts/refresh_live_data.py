@@ -103,7 +103,7 @@ def detect_structural(closes, highs):
     year_highs  = highs[-250:]
     last        = year_closes[-1]
     ma50        = sum(year_closes[-50:]) / 50
-    ma200       = sum(year_closes) / 200
+    ma200       = sum(year_closes[-200:]) / 200
     if last <= ma200:  return False          # (a)
     if ma50  <= ma200: return False          # (b)
     rolling_high = max(year_highs)
@@ -251,6 +251,7 @@ def generate_live_data():
         t1         = price + 1.5 * atr
         t2         = price + 3.0 * atr
         shares     = int(CAPITAL / price)
+        entry_limit = round(price * 1.005, 2)
 
         stocks.append(dict(
             ticker=ticker, fullTicker=f"{ticker}.NS", rating=rating, score=score,
@@ -263,6 +264,7 @@ def generate_live_data():
             immRes=round(imm_res, 2), majRes=round(maj_res, 2),
             supZone=round(sup_zone, 2), breakdown=round(breakdown, 2),
             structural=structural, atr=round(atr, 2),
+            entryLimit=entry_limit,
             sector=SECTORS.get(ticker, 'N/A'),
         ))
 
@@ -313,6 +315,7 @@ def generate_live_data():
             f"    shares: {s['shares']}, investment: {s['investment']},",
             f"    immRes: {s['immRes']}, majRes: {s['majRes']}, supZone: {s['supZone']}, breakdown: {s['breakdown']},",
             f"    structural: {jb(s['structural'])}, atr: {s['atr']},",
+            f"    entryLimit: {s['entryLimit']},",
             f"    sector: '{s['sector']}', mcap: 'N/A', pe: null, roe: null, bookVal: 'N/A', divYield: 'N/A',",
             "  },",
         ]

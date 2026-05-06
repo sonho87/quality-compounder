@@ -2,7 +2,7 @@ import type { StockResult, MarketIndex } from './types';
 
 // AUTO-GENERATED — Kite API live data
 // Fetched: 05 May 2026, 14:10 IST
-// DO NOT edit manually — re-run the generation script
+// DO NOT edit manually — re-run: python3 scripts/refresh_live_data.py
 
 export const LIVE_FETCH_TIME = '05 May 2026, 14:10 IST';
 
@@ -24,6 +24,7 @@ export const LIVE_STOCKS: StockResult[] = [
     shares: 22, investment: 32144.2,
     immRes: 1473.4, majRes: 1611.8, supZone: 1290, breakdown: 1290,
     structural: false, atr: 30.77,
+    entryLimit: 1468.41,
     sector: 'Energy', mcap: 'N/A', pe: null, roe: null, bookVal: 'N/A', divYield: 'N/A',
   },
   {
@@ -36,6 +37,7 @@ export const LIVE_STOCKS: StockResult[] = [
     shares: 13, investment: 31483.4,
     immRes: 2614, majRes: 3630.5, supZone: 2388.8, breakdown: 2346.2,
     structural: false, atr: 61.99,
+    entryLimit: 2433.91,
     sector: 'Technology', mcap: 'N/A', pe: null, roe: null, bookVal: 'N/A', divYield: 'N/A',
   },
   {
@@ -48,6 +50,7 @@ export const LIVE_STOCKS: StockResult[] = [
     shares: 28, investment: 32816.0,
     immRes: 1376.9, majRes: 1728, supZone: 1149.8, breakdown: 1149.8,
     structural: false, atr: 34.39,
+    entryLimit: 1177.86,
     sector: 'Technology', mcap: 'N/A', pe: null, roe: null, bookVal: 'N/A', divYield: 'N/A',
   },
   {
@@ -60,6 +63,7 @@ export const LIVE_STOCKS: StockResult[] = [
     shares: 42, investment: 32512.2,
     immRes: 820.05, majRes: 1020.5, supZone: 745, breakdown: 726.65,
     structural: false, atr: 16.48,
+    entryLimit: 777.97,
     sector: 'Financial Services', mcap: 'N/A', pe: null, roe: null, bookVal: 'N/A', divYield: 'N/A',
   },
   {
@@ -72,6 +76,7 @@ export const LIVE_STOCKS: StockResult[] = [
     shares: 34, investment: 32485.3,
     immRes: 975, majRes: 1102.5, supZone: 814.25, breakdown: 787.9,
     structural: false, atr: 23.9,
+    entryLimit: 960.73,
     sector: 'Financial Services', mcap: 'N/A', pe: null, roe: null, bookVal: 'N/A', divYield: 'N/A',
   },
   {
@@ -84,6 +89,7 @@ export const LIVE_STOCKS: StockResult[] = [
     shares: 165, investment: 33000.0,
     immRes: 212.98, majRes: 266.25, supZone: 196.11, breakdown: 186.5,
     structural: false, atr: 4.22,
+    entryLimit: 201.0,
     sector: 'Technology', mcap: 'N/A', pe: null, roe: null, bookVal: 'N/A', divYield: 'N/A',
   },
   {
@@ -96,6 +102,7 @@ export const LIVE_STOCKS: StockResult[] = [
     shares: 26, investment: 32575.4,
     immRes: 1393.1, majRes: 1500, supZone: 1200.5, breakdown: 1187.6,
     structural: false, atr: 25.28,
+    entryLimit: 1259.16,
     sector: 'Financial Services', mcap: 'N/A', pe: null, roe: null, bookVal: 'N/A', divYield: 'N/A',
   },
   {
@@ -108,6 +115,7 @@ export const LIVE_STOCKS: StockResult[] = [
     shares: 30, investment: 31962.0,
     immRes: 1120.95, majRes: 1234.7, supZone: 1005.05, breakdown: 975.8,
     structural: false, atr: 21.65,
+    entryLimit: 1070.73,
     sector: 'Financial Services', mcap: 'N/A', pe: null, roe: null, bookVal: 'N/A', divYield: 'N/A',
   },
   {
@@ -120,6 +128,7 @@ export const LIVE_STOCKS: StockResult[] = [
     shares: 19, investment: 32976.4,
     immRes: 1757.4, majRes: 1757.4, supZone: 1348.1, breakdown: 1293.5,
     structural: false, atr: 46.7,
+    entryLimit: 1744.28,
     sector: 'Infrastructure', mcap: 'N/A', pe: null, roe: null, bookVal: 'N/A', divYield: 'N/A',
   },
   {
@@ -132,6 +141,7 @@ export const LIVE_STOCKS: StockResult[] = [
     shares: 18, investment: 32691.6,
     immRes: 1841, majRes: 1851.2, supZone: 1613.6, breakdown: 1613.6,
     structural: false, atr: 46.89,
+    entryLimit: 1825.28,
     sector: 'Pharmaceuticals', mcap: 'N/A', pe: null, roe: null, bookVal: 'N/A', divYield: 'N/A',
   },
   {
@@ -144,6 +154,7 @@ export const LIVE_STOCKS: StockResult[] = [
     shares: 7, investment: 30573.9,
     immRes: 4554, majRes: 4554, supZone: 4105, breakdown: 3825,
     structural: false, atr: 91.74,
+    entryLimit: 4389.54,
     sector: 'Consumer Goods', mcap: 'N/A', pe: null, roe: null, bookVal: 'N/A', divYield: 'N/A',
   },
   {
@@ -156,6 +167,7 @@ export const LIVE_STOCKS: StockResult[] = [
     shares: 13, investment: 31548.4,
     immRes: 2582, majRes: 2985.7, supZone: 2145, breakdown: 2115,
     structural: false, atr: 57.67,
+    entryLimit: 2438.93,
     sector: 'Chemicals', mcap: 'N/A', pe: null, roe: null, bookVal: 'N/A', divYield: 'N/A',
   },
   {
@@ -168,6 +180,7 @@ export const LIVE_STOCKS: StockResult[] = [
     shares: 2, investment: 26946.0,
     immRes: 13976, majRes: 17370, supZone: 12420, breakdown: 12201,
     structural: false, atr: 334.57,
+    entryLimit: 13540.37,
     sector: 'Automobile', mcap: 'N/A', pe: null, roe: null, bookVal: 'N/A', divYield: 'N/A',
   },
   {
@@ -180,6 +193,7 @@ export const LIVE_STOCKS: StockResult[] = [
     shares: 22, investment: 32465.4,
     immRes: 1476.5, majRes: 1476.5, supZone: 1179, breakdown: 1159.4,
     structural: false, atr: 36.36,
+    entryLimit: 1483.08,
     sector: 'Consumer Goods', mcap: 'N/A', pe: null, roe: null, bookVal: 'N/A', divYield: 'N/A',
   },
   {
@@ -192,6 +206,7 @@ export const LIVE_STOCKS: StockResult[] = [
     shares: 14, investment: 32439.4,
     immRes: 2408, majRes: 2750, supZone: 2041.9, breakdown: 2022.5,
     structural: false, atr: 74.09,
+    entryLimit: 2328.68,
     sector: 'Consumer Goods', mcap: 'N/A', pe: null, roe: null, bookVal: 'N/A', divYield: 'N/A',
   },
   {
@@ -204,6 +219,7 @@ export const LIVE_STOCKS: StockResult[] = [
     shares: 8, investment: 32430.4,
     immRes: 4149, majRes: 4440, supZone: 3577, breakdown: 3288.1,
     structural: false, atr: 89.49,
+    entryLimit: 4074.07,
     sector: 'Infrastructure', mcap: 'N/A', pe: null, roe: null, bookVal: 'N/A', divYield: 'N/A',
   },
   {
@@ -216,6 +232,7 @@ export const LIVE_STOCKS: StockResult[] = [
     shares: 69, investment: 32578.35,
     immRes: 491.25, majRes: 491.25, supZone: 427.5, breakdown: 413.1,
     structural: false, atr: 10.66,
+    entryLimit: 474.51,
     sector: 'Energy', mcap: 'N/A', pe: null, roe: null, bookVal: 'N/A', divYield: 'N/A',
   },
   {
@@ -228,6 +245,7 @@ export const LIVE_STOCKS: StockResult[] = [
     shares: 102, investment: 32711.4,
     immRes: 324.95, majRes: 324.95, supZone: 287.3, breakdown: 283.5,
     structural: false, atr: 6.68,
+    entryLimit: 322.30,
     sector: 'Utilities', mcap: 'N/A', pe: null, roe: null, bookVal: 'N/A', divYield: 'N/A',
   },
   {
@@ -240,6 +258,7 @@ export const LIVE_STOCKS: StockResult[] = [
     shares: 82, investment: 32734.4,
     immRes: 414.4, majRes: 414.4, supZone: 355.7, breakdown: 352,
     structural: false, atr: 8.61,
+    entryLimit: 401.19,
     sector: 'Utilities', mcap: 'N/A', pe: null, roe: null, bookVal: 'N/A', divYield: 'N/A',
   },
 ];

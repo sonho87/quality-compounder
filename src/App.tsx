@@ -78,19 +78,21 @@ export default function App() {
     // When CSV is uploaded, generate placeholder stock results using mock data as a base
     // In production these would be fetched from Dhan/Kite and evaluated by indicators.ts
     const symbolSet = new Set(symbols.map(s => s.replace('.NS', '').replace('.BO', '')));
-    const matched = MOCK_STOCKS.filter(s => symbolSet.has(s.ticker));
-    // For symbols with no mock data, create placeholder entries
+    // Prefer live data (Kite/CSV-generated) over mock data for matching
+    const dataSource = kiteStocks ?? (LIVE_STOCKS.length > 0 ? LIVE_STOCKS : MOCK_STOCKS);
+    const matched = dataSource.filter(s => symbolSet.has(s.ticker));
+    // For symbols with no data, create placeholder entries
     // No slice limit — show ALL symbols from the CSV
     const unmatched = symbols
       .map(s => s.replace('.NS', '').replace('.BO', ''))
-      .filter(s => !MOCK_STOCKS.find(m => m.ticker === s))
+      .filter(s => !dataSource.find(m => m.ticker === s))
       .map((ticker): StockResult => ({
         ticker, fullTicker: `${ticker}.NS`,
         rating: '🔴 CHOPPY', score: 0, v4Signal: false,
         price: 0, change: 0, rsi: 50, tradedVal: 0,
         ret6m: 0, ret1y: 0, ret3y: 0, target1: 0, target2: 0, stop: 0,
         shares: 0, investment: 0, immRes: 0, majRes: 0, supZone: 0, breakdown: 0,
-        structural: false, atr: 0,
+        structural: false, atr: 0, entryLimit: 0,
         sector: 'N/A', mcap: 'N/A', pe: null, roe: null, bookVal: 'N/A', divYield: 'N/A',
       }));
     setStocks([...matched, ...unmatched]);

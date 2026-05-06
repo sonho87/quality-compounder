@@ -78,7 +78,7 @@ function detectStructural(closes: number[], highs: number[]): boolean {
   const yearHighs = highs.slice(-250);
   const last      = year[year.length - 1];
   const ma50      = year.slice(-50).reduce((a, b) => a + b, 0) / 50;
-  const ma200     = year.reduce((a, b) => a + b, 0) / 200;
+  const ma200     = closes.slice(-200).reduce((a, b) => a + b, 0) / 200;
   if (last <= ma200) return false;
   if (ma50 <= ma200) return false;
   const rollingHigh = Math.max(...yearHighs);
@@ -185,6 +185,7 @@ function screenStock(ticker: string, sector: string, bars: Bar[], capital: numbe
     breakdown:  +Math.min(...lows.slice(-50)).toFixed(2),
     structural,
     atr:        +atr.toFixed(2),
+    entryLimit: +(price * 1.005).toFixed(2),
     sector,
     mcap:       'N/A',
     pe:         null as number | null,

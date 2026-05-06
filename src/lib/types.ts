@@ -41,6 +41,7 @@ export interface StockResult {
   breakdown: number;
   structural: boolean;
   atr: number;
+  entryLimit: number;   // Smart Entry = price × 1.005 (limit order price)
   sector: string;
   mcap: string;
   pe: number | null;

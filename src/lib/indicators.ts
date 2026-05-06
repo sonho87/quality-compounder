@@ -67,7 +67,7 @@ export function detectStructuralStrength(closes: number[], highs: number[]): boo
   const lastPrice  = yearCloses[yearCloses.length - 1];
 
   const ma50  = yearCloses.slice(-50).reduce((a, b) => a + b, 0) / 50;
-  const ma200 = yearCloses.reduce((a, b) => a + b, 0) / 200;
+  const ma200 = closes.slice(-200).reduce((a, b) => a + b, 0) / 200;
 
   // (a) Price above MA200
   if (lastPrice <= ma200) return false;
@@ -238,6 +238,7 @@ export function evaluateStock(
     breakdown,
     structural,
     atr:       currentATR,
+    entryLimit: +(currentPrice * 1.005).toFixed(2),
     sector:    'N/A',
     mcap:      'N/A',
     pe:        null,
