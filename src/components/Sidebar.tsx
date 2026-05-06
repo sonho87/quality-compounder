@@ -9,6 +9,7 @@ interface SidebarProps {
   onSymbolsLoaded: (symbols: string[]) => void;
   symbolCount: number;
   onClearCache: () => void;
+  screening?: boolean;
 }
 
 function Section({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) {
@@ -47,7 +48,7 @@ function InputField({ label, value, onChange, type = 'text', placeholder = '' }:
   );
 }
 
-export default function Sidebar({ settings, onSettingsChange, onSymbolsLoaded, symbolCount, onClearCache }: SidebarProps) {
+export default function Sidebar({ settings, onSettingsChange, onSymbolsLoaded, symbolCount, onClearCache, screening }: SidebarProps) {
   const [csvError, setCsvError] = useState('');
   const [csvLoaded, setCsvLoaded] = useState(false);
 
@@ -96,13 +97,19 @@ export default function Sidebar({ settings, onSettingsChange, onSymbolsLoaded, s
             </div>
             <input type="file" accept=".csv" className="hidden" onChange={handleFileUpload} />
           </label>
-          {csvLoaded && (
+          {screening && (
+            <div className="mt-2 flex items-center gap-2 justify-center">
+              <div className="w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+              <p className="text-xs text-blue-600 font-semibold">Screening stocks...</p>
+            </div>
+          )}
+          {!screening && csvLoaded && symbolCount > 0 && (
             <p className="mt-2 text-xs text-emerald-600 font-semibold text-center">
-              ✓ {symbolCount} stocks loaded
+              ✓ {symbolCount} stocks screened
             </p>
           )}
           {csvError && <p className="mt-2 text-xs text-red-500 font-medium">{csvError}</p>}
-          {!csvLoaded && (
+          {!csvLoaded && !screening && (
             <p className="mt-2 text-xs text-slate-400 text-center">
               Upload NSE CSV to start screening
             </p>

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Sun, Moon, LayoutDashboard, SlidersHorizontal, FileBarChart2, Bot, Menu, X } from 'lucide-react';
 import type { AppSettings, PortfolioPosition, StockResult } from '@/lib/types';
 import { MOCK_STOCKS, MOCK_INDICES } from '@/lib/mockData';
@@ -34,6 +34,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   geminiApiKey: '',
 };
 
+// Batch size for Yahoo Finance API calls
+const YAHOO_BATCH_SIZE = 10;
+
 export default function App() {
   const [isDark, setIsDark] = useState(() => {
     return localStorage.getItem('qt-theme') === 'dark' ||
@@ -47,17 +50,14 @@ export default function App() {
   const { sessionState, userName, stocks: kiteStocks, refresh: kiteRefresh, logout: kiteLogout }
     = useKiteData(settings.capitalPerTrade);
 
-  // Resolve which stock list to show based on data source
-  const getBaseStocks = (): StockResult[] => {
-    if (kiteStocks && kiteStocks.length > 0) return kiteStocks;
-    if (settings.dataSource === 'mock') return MOCK_STOCKS;
-    // CSV mode and API modes start empty — user must upload or login
-    return [];
-  };
-
-  const [stocks, setStocks] = useState<StockResult[]>([]);  // Start empty — no demo stocks
+  const [stocks, setStocks] = useState<StockResult[]>([]);  // Start empty
   const [portfolio, setPortfolio] = useState<PortfolioPosition[]>([]);
   const [selectedTicker, setSelectedTicker] = useState('');
+
+  // Screening progress state
+  const [screening, setScreening] = useState(false);
+  const [screenProgress, setScreenProgress] = useState({ done: 0, total: 0, errors: 0 });
+  const abortRef = useRef(false);
 
   // When Kite OAuth finishes loading, adopt live data
   useEffect(() => {
@@ -69,18 +69,17 @@ export default function App() {
 
   // When user switches data source radio button, reset stocks accordingly
   useEffect(() => {
-    if (kiteStocks && kiteStocks.length > 0) return; // Kite live data always wins
+    if (kiteStocks && kiteStocks.length > 0) return;
     if (settings.dataSource === 'mock') {
       setStocks(MOCK_STOCKS);
       setSelectedTicker(MOCK_STOCKS[0]?.ticker ?? '');
     } else if (settings.dataSource === 'kite' || settings.dataSource === 'dhan') {
-      // For API modes, show LIVE snapshot while user logs in (or empty)
       if (LIVE_STOCKS.length > 0) {
         setStocks(LIVE_STOCKS);
         setSelectedTicker(LIVE_STOCKS[0]?.ticker ?? '');
       }
     }
-    // 'csv' mode: stocks are set by handleSymbolsLoaded, don't reset here
+    // 'csv' mode: stocks are set by screenSymbols, don't reset here
   }, [settings.dataSource]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const isLiveData = (kiteStocks && kiteStocks.length > 0) || sessionState.status === 'ready';
@@ -95,30 +94,71 @@ export default function App() {
     setSettings(prev => ({ ...prev, ...patch }));
   };
 
+  // ─── CSV UPLOAD → Yahoo Finance Screening Pipeline ─────────────────────────
+  // Sends symbols in batches of 10 to /api/yahoo-screen, accumulates results
+  const screenSymbols = useCallback(async (symbols: string[]) => {
+    setScreening(true);
+    setScreenProgress({ done: 0, total: symbols.length, errors: 0 });
+    setStocks([]);
+    abortRef.current = false;
+
+    const allResults: StockResult[] = [];
+    let errorCount = 0;
+
+    for (let i = 0; i < symbols.length; i += YAHOO_BATCH_SIZE) {
+      if (abortRef.current) break;
+
+      const batch = symbols.slice(i, i + YAHOO_BATCH_SIZE);
+
+      try {
+        const res = await fetch('/api/yahoo-screen', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            symbols: batch,
+            capital: settings.capitalPerTrade,
+          }),
+        });
+
+        if (!res.ok) {
+          errorCount += batch.length;
+          setScreenProgress(p => ({ ...p, done: p.done + batch.length, errors: p.errors + batch.length }));
+          continue;
+        }
+
+        const data = await res.json() as {
+          results: StockResult[];
+          errors?: string[];
+        };
+
+        if (data.results?.length > 0) {
+          allResults.push(...data.results);
+          // Progressively update the UI — show results as they come in
+          setStocks(prev => [...prev, ...data.results]);
+          if (!selectedTicker && data.results[0]) {
+            setSelectedTicker(data.results[0].ticker);
+          }
+        }
+
+        errorCount += data.errors?.length ?? 0;
+      } catch (err) {
+        console.error('Screening batch error:', err);
+        errorCount += batch.length;
+      }
+
+      setScreenProgress({
+        done: Math.min(i + YAHOO_BATCH_SIZE, symbols.length),
+        total: symbols.length,
+        errors: errorCount,
+      });
+    }
+
+    setScreening(false);
+  }, [settings.capitalPerTrade]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleSymbolsLoaded = (symbols: string[]) => {
-    // When CSV is uploaded, generate placeholder stock results using mock data as a base
-    // In production these would be fetched from Dhan/Kite and evaluated by indicators.ts
-    const symbolSet = new Set(symbols.map(s => s.replace('.NS', '').replace('.BO', '')));
-    // Always match CSV symbols against MOCK_STOCKS (curated, correct tier data)
-    // LIVE_STOCKS has outdated prices and all show CHOPPY — not useful for matching
-    const dataSource = kiteStocks ?? MOCK_STOCKS;
-    const matched = dataSource.filter(s => symbolSet.has(s.ticker));
-    // For symbols with no data, create placeholder entries
-    // No slice limit — show ALL symbols from the CSV
-    const unmatched = symbols
-      .map(s => s.replace('.NS', '').replace('.BO', ''))
-      .filter(s => !dataSource.find(m => m.ticker === s))
-      .map((ticker): StockResult => ({
-        ticker, fullTicker: `${ticker}.NS`,
-        rating: '🔴 TIER 5: CHOPPY', score: 0, v4Signal: false,
-        price: 0, change: 0, rsi: 50, tradedVal: 0,
-        ret6m: 0, ret1y: 0, ret3y: 0, target1: 0, target2: 0, stop: 0,
-        shares: 0, investment: 0, immRes: 0, majRes: 0, supZone: 0, breakdown: 0,
-        structural: false, atr: 0, entryLimit: 0,
-        sector: 'N/A', mcap: 'N/A', pe: null, roe: null, bookVal: 'N/A', divYield: 'N/A',
-      }));
-    setStocks([...matched, ...unmatched]);
-    if (matched.length > 0) setSelectedTicker(matched[0].ticker);
+    // CSV uploaded — kick off the Yahoo Finance screening pipeline
+    screenSymbols(symbols);
   };
 
   const handleAddToPortfolio = (stock: StockResult) => {
@@ -140,12 +180,15 @@ export default function App() {
   const [resetKey, setResetKey] = useState(0);
 
   const handleClearCache = () => {
+    abortRef.current = true; // Stop any in-progress screening
     setStocks([]);
     setPortfolio([]);
     setSettings(DEFAULT_SETTINGS);
     setSelectedTicker('');
     setActiveTab('overview');
-    setResetKey(k => k + 1); // Signal Sidebar to reset its local state
+    setScreening(false);
+    setScreenProgress({ done: 0, total: 0, errors: 0 });
+    setResetKey(k => k + 1);
   };
 
   const navigateToTearSheet = () => setActiveTab('tearsheet');
@@ -163,6 +206,7 @@ export default function App() {
           onSymbolsLoaded={handleSymbolsLoaded}
           symbolCount={stocks.length}
           onClearCache={handleClearCache}
+          screening={screening}
         />
       </div>
 
@@ -182,10 +226,10 @@ export default function App() {
             <div className="flex items-center gap-2">
               <span className="text-lg">⚡</span>
               <span className="font-black text-slate-900 dark:text-slate-100 text-lg tracking-tight">Quant Terminal</span>
-              <span className="badge-slate font-mono text-xs">V7.0</span>
+              <span className="badge-slate font-mono text-xs">V8.4</span>
             </div>
             <div className="hidden sm:flex items-center gap-2">
-              <span className="badge-green">{stocks.length} Stocks</span>
+              {stocks.length > 0 && <span className="badge-green">{stocks.length} Stocks</span>}
               {v4Count > 0 && (
                 <span className="badge-amber">{v4Count} V4 Signals</span>
               )}
@@ -197,7 +241,6 @@ export default function App() {
 
           {/* Right: tabs + dark mode */}
           <div className="flex items-center gap-1">
-            {/* Tab nav in header for wide screens */}
             <nav className="hidden md:flex items-center gap-0.5 mr-3">
               {TAB_CONFIG.map(tab => (
                 <button
@@ -258,7 +301,48 @@ export default function App() {
               kiteApiSecret={settings.kiteApiSecret}
             />
 
-            {/* Fallback: show last-saved data timestamp if viewing snapshot data */}
+            {/* Screening progress banner */}
+            {screening && (
+              <div className="mb-4 px-4 py-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900 rounded-xl">
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                  <span className="text-sm font-semibold text-blue-800 dark:text-blue-300">
+                    Screening {screenProgress.done}/{screenProgress.total} stocks via Yahoo Finance...
+                  </span>
+                  {screenProgress.errors > 0 && (
+                    <span className="text-xs text-amber-600 dark:text-amber-400">
+                      ({screenProgress.errors} errors)
+                    </span>
+                  )}
+                </div>
+                <div className="w-full bg-blue-200 dark:bg-blue-900 rounded-full h-2">
+                  <div
+                    className="bg-blue-600 dark:bg-blue-400 h-2 rounded-full transition-all duration-300"
+                    style={{ width: `${screenProgress.total > 0 ? (screenProgress.done / screenProgress.total * 100) : 0}%` }}
+                  />
+                </div>
+                <p className="mt-1.5 text-xs text-blue-600 dark:text-blue-400">
+                  Fetching 3yr OHLCV + fundamentals → running V8.4 screener (RSI, structural strength, V4 signals)
+                </p>
+              </div>
+            )}
+
+            {/* Screening complete banner */}
+            {!screening && screenProgress.total > 0 && stocks.length > 0 && (
+              <div className="flex items-center gap-2 mb-4 px-4 py-2 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900 rounded-xl text-xs">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0" />
+                <span className="font-semibold text-emerald-700 dark:text-emerald-400">
+                  Screening complete — {stocks.length} stocks processed · {v4Count} V4 signals found
+                </span>
+                {screenProgress.errors > 0 && (
+                  <span className="text-amber-600 dark:text-amber-400">
+                    · {screenProgress.errors} failed (insufficient data or API error)
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* Snapshot banner for Kite/Dhan API modes */}
             {sessionState.status === 'none' && LIVE_FETCH_TIME && stocks.length > 0 && settings.dataSource !== 'csv' && settings.dataSource !== 'mock' && (
               <div className="flex items-center gap-2 mb-4 px-4 py-2 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-500 dark:text-slate-400">
                 <span className="w-1.5 h-1.5 rounded-full bg-slate-400 flex-shrink-0" />
