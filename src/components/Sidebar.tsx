@@ -68,6 +68,8 @@ export default function Sidebar({ settings, onSettingsChange, onSymbolsLoaded, s
       }
     };
     reader.readAsText(file);
+    // Reset input so the same file can be re-uploaded after clear cache
+    e.target.value = '';
   };
 
   return (
@@ -102,7 +104,7 @@ export default function Sidebar({ settings, onSettingsChange, onSymbolsLoaded, s
           {csvError && <p className="mt-2 text-xs text-red-500 font-medium">{csvError}</p>}
           {!csvLoaded && (
             <p className="mt-2 text-xs text-slate-400 text-center">
-              Using 20 demo stocks
+              Upload NSE CSV to start screening
             </p>
           )}
         </Section>

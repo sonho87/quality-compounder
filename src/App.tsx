@@ -24,7 +24,7 @@ const TAB_CONFIG: { key: Tab; label: string; icon: React.ReactNode }[] = [
 const DEFAULT_SETTINGS: AppSettings = {
   capitalPerTrade: 33000,
   minTradeValLakhs: 50,
-  dataSource: 'mock',
+  dataSource: 'csv',
   dhanClientId: '',
   dhanAccessToken: '',
   kiteApiKey: '',
@@ -47,18 +47,17 @@ export default function App() {
   const { sessionState, userName, stocks: kiteStocks, refresh: kiteRefresh, logout: kiteLogout }
     = useKiteData(settings.capitalPerTrade);
 
-  // Resolve which stock list to show based on data source priority:
-  //   Kite OAuth (fresh) → Demo (mock) → CSV → LIVE snapshot → mock fallback
+  // Resolve which stock list to show based on data source
   const getBaseStocks = (): StockResult[] => {
     if (kiteStocks && kiteStocks.length > 0) return kiteStocks;
     if (settings.dataSource === 'mock') return MOCK_STOCKS;
-    if (LIVE_STOCKS.length > 0) return LIVE_STOCKS;
-    return MOCK_STOCKS;
+    // CSV mode and API modes start empty — user must upload or login
+    return [];
   };
 
-  const [stocks, setStocks] = useState<StockResult[]>(getBaseStocks);
+  const [stocks, setStocks] = useState<StockResult[]>([]);  // Start empty — no demo stocks
   const [portfolio, setPortfolio] = useState<PortfolioPosition[]>([]);
-  const [selectedTicker, setSelectedTicker] = useState(() => getBaseStocks()[0]?.ticker ?? '');
+  const [selectedTicker, setSelectedTicker] = useState('');
 
   // When Kite OAuth finishes loading, adopt live data
   useEffect(() => {
@@ -75,15 +74,16 @@ export default function App() {
       setStocks(MOCK_STOCKS);
       setSelectedTicker(MOCK_STOCKS[0]?.ticker ?? '');
     } else if (settings.dataSource === 'kite' || settings.dataSource === 'dhan') {
-      // For API modes, reset to LIVE snapshot while user logs in
-      const base = LIVE_STOCKS.length > 0 ? LIVE_STOCKS : MOCK_STOCKS;
-      setStocks(base);
-      setSelectedTicker(base[0]?.ticker ?? '');
+      // For API modes, show LIVE snapshot while user logs in (or empty)
+      if (LIVE_STOCKS.length > 0) {
+        setStocks(LIVE_STOCKS);
+        setSelectedTicker(LIVE_STOCKS[0]?.ticker ?? '');
+      }
     }
     // 'csv' mode: stocks are set by handleSymbolsLoaded, don't reset here
   }, [settings.dataSource]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const isLiveData = LIVE_STOCKS.length > 0 || sessionState.status === 'ready';
+  const isLiveData = (kiteStocks && kiteStocks.length > 0) || sessionState.status === 'ready';
 
   // Dark mode sync
   useEffect(() => {
@@ -137,12 +137,15 @@ export default function App() {
     setPortfolio(prev => [...prev, position]);
   };
 
+  const [resetKey, setResetKey] = useState(0);
+
   const handleClearCache = () => {
-    setStocks(LIVE_STOCKS.length > 0 ? LIVE_STOCKS : MOCK_STOCKS);
+    setStocks([]);
     setPortfolio([]);
     setSettings(DEFAULT_SETTINGS);
-    setSelectedTicker((LIVE_STOCKS[0] ?? MOCK_STOCKS[0])?.ticker ?? '');
+    setSelectedTicker('');
     setActiveTab('overview');
+    setResetKey(k => k + 1); // Signal Sidebar to reset its local state
   };
 
   const navigateToTearSheet = () => setActiveTab('tearsheet');
@@ -154,6 +157,7 @@ export default function App() {
       {/* Sidebar */}
       <div className={`flex-shrink-0 transition-all duration-200 ${sidebarOpen ? 'w-72' : 'w-0 overflow-hidden'}`}>
         <Sidebar
+          key={resetKey}
           settings={settings}
           onSettingsChange={handleSettingsChange}
           onSymbolsLoaded={handleSymbolsLoaded}
@@ -254,8 +258,8 @@ export default function App() {
               kiteApiSecret={settings.kiteApiSecret}
             />
 
-            {/* Fallback: show last-saved data timestamp if no fresh Kite session */}
-            {sessionState.status === 'none' && LIVE_FETCH_TIME && (
+            {/* Fallback: show last-saved data timestamp if viewing snapshot data */}
+            {sessionState.status === 'none' && LIVE_FETCH_TIME && stocks.length > 0 && settings.dataSource !== 'csv' && settings.dataSource !== 'mock' && (
               <div className="flex items-center gap-2 mb-4 px-4 py-2 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-500 dark:text-slate-400">
                 <span className="w-1.5 h-1.5 rounded-full bg-slate-400 flex-shrink-0" />
                 Showing snapshot from {LIVE_FETCH_TIME}
