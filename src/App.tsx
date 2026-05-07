@@ -1,401 +1,319 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { Sun, Moon, LayoutDashboard, SlidersHorizontal, FileBarChart2, Bot, Menu, X } from 'lucide-react';
-import type { AppSettings, PortfolioPosition, StockResult } from '@/lib/types';
-import { MOCK_STOCKS, MOCK_INDICES } from '@/lib/mockData';
+import React, { useState } from 'react';
+import { 
+  Zap, Database, Settings2, Key, ChevronRight, Upload, 
+  Search, TrendingUp, TrendingDown, Filter, BarChart2 
+} from 'lucide-react';
+
+// Import your data (make sure the paths match your project)
 import { LIVE_STOCKS, LIVE_INDICES, LIVE_FETCH_TIME } from '@/lib/liveData';
-import MarketBar from '@/components/MarketBar';
-import Sidebar from '@/components/Sidebar';
-import OverviewTab from '@/components/tabs/OverviewTab';
-import ScreenerTab from '@/components/tabs/ScreenerTab';
-import TearSheetTab from '@/components/tabs/TearSheetTab';
-import AICopilotTab from '@/components/tabs/AICopilotTab';
-import KiteLoginBanner from '@/components/KiteLoginBanner';
-import { useKiteData } from '@/hooks/useKiteData';
 
-type Tab = 'overview' | 'screener' | 'tearsheet' | 'ai';
-
-const TAB_CONFIG: { key: Tab; label: string; icon: React.ReactNode }[] = [
-  { key: 'overview',   label: 'Overview',    icon: <LayoutDashboard className="w-4 h-4" /> },
-  { key: 'screener',   label: 'Screener',    icon: <SlidersHorizontal className="w-4 h-4" /> },
-  { key: 'tearsheet',  label: 'Tear Sheet',  icon: <FileBarChart2 className="w-4 h-4" /> },
-  { key: 'ai',         label: 'AI Co-Pilot', icon: <Bot className="w-4 h-4" /> },
-];
-
-const DEFAULT_SETTINGS: AppSettings = {
-  capitalPerTrade: 33000,
-  minTradeValLakhs: 50,
-  dataSource: 'csv',
-  dhanClientId: '',
-  dhanAccessToken: '',
-  kiteApiKey: '',
-  kiteApiSecret: '',
-  kiteAccessToken: '',
-  kiteProxyUrl: '',
-  geminiApiKey: '',
-};
-
-// Batch size for Yahoo Finance API calls
-const YAHOO_BATCH_SIZE = 10;
+// If you are using Shadcn UI, ensure these imports work, otherwise replace with standard div/button tags
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 
 export default function App() {
-  const [isDark, setIsDark] = useState(() => {
-    return localStorage.getItem('qt-theme') === 'dark' ||
-      (!localStorage.getItem('qt-theme') && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const [activeTab, setActiveTab] = useState('overview');
+  
+  // Screener State
+  const [screenerSearch, setScreenerSearch] = useState('');
+  const [screenerTier, setScreenerTier] = useState('All Tiers');
+  const [screenerV4Only, setScreenerV4Only] = useState(false);
+
+  // Overview State
+  const [overviewSearch, setOverviewSearch] = useState('');
+  const [overviewFilter, setOverviewFilter] = useState('V4 Signals');
+
+  // --- FILTER LOGIC ---
+  const overviewStocks = LIVE_STOCKS.filter((stock) => {
+    if (overviewSearch && !stock.ticker.toLowerCase().includes(overviewSearch.toLowerCase())) return false;
+    if (overviewFilter === 'V4 Signals') return stock.v4Signal;
+    if (overviewFilter === 'Quality') return stock.rating.includes('TIER 2') || stock.rating.includes('QUALITY');
+    if (overviewFilter === 'Monopoly') return stock.rating.includes('TIER 1');
+    if (overviewFilter === 'Emerging') return stock.rating.includes('TIER 3');
+    if (overviewFilter === 'Momentum') return stock.rating.includes('TIER 4');
+    return true;
   });
-  const [activeTab, setActiveTab] = useState<Tab>('overview');
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
 
-  // Kite OAuth live data hook
-  const { sessionState, userName, stocks: kiteStocks, refresh: kiteRefresh, logout: kiteLogout }
-    = useKiteData(settings.capitalPerTrade);
+  const screenerStocks = LIVE_STOCKS.filter((stock) => {
+    if (screenerSearch && !stock.ticker.toLowerCase().includes(screenerSearch.toLowerCase())) return false;
+    if (screenerTier !== 'All Tiers' && stock.rating !== screenerTier) return false;
+    if (screenerV4Only && !stock.v4Signal) return false;
+    return true;
+  });
 
-  const [stocks, setStocks] = useState<StockResult[]>([]);  // Start empty
-  const [portfolio, setPortfolio] = useState<PortfolioPosition[]>([]);
-  const [selectedTicker, setSelectedTicker] = useState('');
-
-  // Screening progress state
-  const [screening, setScreening] = useState(false);
-  const [screenProgress, setScreenProgress] = useState({ done: 0, total: 0, errors: 0 });
-  const abortRef = useRef(false);
-
-  // When Kite OAuth finishes loading, adopt live data
-  useEffect(() => {
-    if (kiteStocks && kiteStocks.length > 0) {
-      setStocks(kiteStocks);
-      setSelectedTicker(kiteStocks[0].ticker);
-    }
-  }, [kiteStocks]);
-
-  // When user switches data source radio button, reset stocks accordingly
-  useEffect(() => {
-    if (kiteStocks && kiteStocks.length > 0) return;
-    if (settings.dataSource === 'mock') {
-      setStocks(MOCK_STOCKS);
-      setSelectedTicker(MOCK_STOCKS[0]?.ticker ?? '');
-    } else if (settings.dataSource === 'kite' || settings.dataSource === 'dhan') {
-      if (LIVE_STOCKS.length > 0) {
-        setStocks(LIVE_STOCKS);
-        setSelectedTicker(LIVE_STOCKS[0]?.ticker ?? '');
-      }
-    }
-    // 'csv' mode: stocks are set by screenSymbols, don't reset here
-  }, [settings.dataSource]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const isLiveData = (kiteStocks && kiteStocks.length > 0) || sessionState.status === 'ready';
-
-  // Dark mode sync
-  useEffect(() => {
-    document.documentElement.classList.toggle('dark', isDark);
-    localStorage.setItem('qt-theme', isDark ? 'dark' : 'light');
-  }, [isDark]);
-
-  const handleSettingsChange = (patch: Partial<AppSettings>) => {
-    setSettings(prev => ({ ...prev, ...patch }));
+  // Helper to colorize badges based on Tier
+  const getBadgeStyle = (rating: string) => {
+    if (rating.includes('TIER 1')) return 'bg-amber-100 text-amber-800 border-amber-200';
+    if (rating.includes('TIER 2')) return 'bg-green-100 text-green-800 border-green-200';
+    if (rating.includes('PROVISIONAL')) return 'bg-yellow-100 text-yellow-800 border-yellow-200';
+    if (rating.includes('TIER 3')) return 'bg-yellow-50 text-yellow-700 border-yellow-100';
+    if (rating.includes('TIER 4')) return 'bg-blue-100 text-blue-800 border-blue-200';
+    return 'bg-slate-100 text-slate-600 border-slate-200';
   };
-
-  // ─── CSV UPLOAD → Yahoo Finance Screening Pipeline ─────────────────────────
-  // Sends symbols in batches of 10 to /api/yahoo-screen, accumulates results
-  const screenSymbols = useCallback(async (symbols: string[]) => {
-    setScreening(true);
-    setScreenProgress({ done: 0, total: symbols.length, errors: 0 });
-    setStocks([]);
-    abortRef.current = false;
-
-    const allResults: StockResult[] = [];
-    let errorCount = 0;
-
-    for (let i = 0; i < symbols.length; i += YAHOO_BATCH_SIZE) {
-      if (abortRef.current) break;
-
-      const batch = symbols.slice(i, i + YAHOO_BATCH_SIZE);
-
-      try {
-        const res = await fetch('/api/yahoo-screen', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            symbols: batch,
-            capital: settings.capitalPerTrade,
-          }),
-        });
-
-        if (!res.ok) {
-          errorCount += batch.length;
-          setScreenProgress(p => ({ ...p, done: p.done + batch.length, errors: p.errors + batch.length }));
-          continue;
-        }
-
-        const data = await res.json() as {
-          results: StockResult[];
-          errors?: string[];
-        };
-
-        if (data.results?.length > 0) {
-          allResults.push(...data.results);
-          // Progressively update the UI — show results as they come in
-          setStocks(prev => [...prev, ...data.results]);
-          if (!selectedTicker && data.results[0]) {
-            setSelectedTicker(data.results[0].ticker);
-          }
-        }
-
-        errorCount += data.errors?.length ?? 0;
-      } catch (err) {
-        console.error('Screening batch error:', err);
-        errorCount += batch.length;
-      }
-
-      setScreenProgress({
-        done: Math.min(i + YAHOO_BATCH_SIZE, symbols.length),
-        total: symbols.length,
-        errors: errorCount,
-      });
-    }
-
-    setScreening(false);
-  }, [settings.capitalPerTrade]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const handleSymbolsLoaded = (symbols: string[]) => {
-    // CSV uploaded — kick off the Yahoo Finance screening pipeline
-    screenSymbols(symbols);
-  };
-
-  const handleAddToPortfolio = (stock: StockResult) => {
-    if (portfolio.find(p => p.ticker === stock.ticker)) return;
-    const position: PortfolioPosition = {
-      ticker: stock.ticker,
-      entryPrice: stock.price * 1.005,
-      shares: stock.shares,
-      investment: stock.investment,
-      currentPrice: stock.price,
-      target1: stock.target1,
-      target2: stock.target2,
-      stop: stock.stop,
-      addedAt: new Date().toLocaleDateString('en-IN'),
-    };
-    setPortfolio(prev => [...prev, position]);
-  };
-
-  const [resetKey, setResetKey] = useState(0);
-
-  const handleClearCache = () => {
-    abortRef.current = true; // Stop any in-progress screening
-    setStocks([]);
-    setPortfolio([]);
-    setSettings(DEFAULT_SETTINGS);
-    setSelectedTicker('');
-    setActiveTab('overview');
-    setScreening(false);
-    setScreenProgress({ done: 0, total: 0, errors: 0 });
-    setResetKey(k => k + 1);
-  };
-
-  const navigateToTearSheet = () => setActiveTab('tearsheet');
-
-  const v4Count = stocks.filter(s => s.v4Signal).length;
 
   return (
-    <div className="flex h-screen overflow-hidden bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
-      {/* Sidebar */}
-      <div className={`flex-shrink-0 transition-all duration-200 ${sidebarOpen ? 'w-72' : 'w-0 overflow-hidden'}`}>
-        <Sidebar
-          key={resetKey}
-          settings={settings}
-          onSettingsChange={handleSettingsChange}
-          onSymbolsLoaded={handleSymbolsLoaded}
-          symbolCount={stocks.length}
-          onClearCache={handleClearCache}
-          screening={screening}
-        />
-      </div>
-
-      {/* Main content */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        {/* Top header */}
-        <header className="flex-shrink-0 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-5 py-3 flex items-center justify-between gap-4 z-10">
-          {/* Left: toggle + branding */}
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setSidebarOpen(o => !o)}
-              className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-slate-500"
-              aria-label="Toggle sidebar"
-            >
-              {sidebarOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
-            </button>
-            <div className="flex items-center gap-2">
-              <span className="text-lg">⚡</span>
-              <span className="font-black text-slate-900 dark:text-slate-100 text-lg tracking-tight">Quant Terminal</span>
-              <span className="badge-slate font-mono text-xs">V8.4</span>
-            </div>
-            <div className="hidden sm:flex items-center gap-2">
-              {stocks.length > 0 && <span className="badge-green">{stocks.length} Stocks</span>}
-              {v4Count > 0 && (
-                <span className="badge-amber">{v4Count} V4 Signals</span>
-              )}
-              {portfolio.length > 0 && (
-                <span className="badge-blue">{portfolio.length} Positions</span>
-              )}
-            </div>
-          </div>
-
-          {/* Right: tabs + dark mode */}
-          <div className="flex items-center gap-1">
-            <nav className="hidden md:flex items-center gap-0.5 mr-3">
-              {TAB_CONFIG.map(tab => (
-                <button
-                  key={tab.key}
-                  onClick={() => setActiveTab(tab.key)}
-                  className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold transition-colors ${
-                    activeTab === tab.key
-                      ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400'
-                      : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-700 dark:hover:text-slate-200'
-                  }`}
-                >
-                  {tab.icon}
-                  {tab.label}
-                  {tab.key === 'ai' && settings.geminiApiKey && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                  )}
-                </button>
-              ))}
-            </nav>
-
-            <button
-              onClick={() => setIsDark(d => !d)}
-              className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-slate-500 dark:text-slate-400"
-              aria-label="Toggle dark mode"
-            >
-              {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-            </button>
-          </div>
-        </header>
-
-        {/* Mobile tab bar */}
-        <div className="md:hidden flex border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-x-auto flex-shrink-0">
-          {TAB_CONFIG.map(tab => (
-            <button
-              key={tab.key}
-              onClick={() => setActiveTab(tab.key)}
-              className={`flex items-center gap-1.5 px-4 py-3 text-sm font-semibold whitespace-nowrap transition-colors border-b-2 ${
-                activeTab === tab.key
-                  ? 'border-emerald-500 text-emerald-700 dark:text-emerald-400'
-                  : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-              }`}
-            >
-              {tab.icon} {tab.label}
-            </button>
-          ))}
+    <div className="flex h-screen w-full bg-white font-sans text-slate-900 overflow-hidden">
+      
+      {/* ─── LEFT SIDEBAR ─── */}
+      <aside className="w-80 flex-shrink-0 border-r border-slate-200 bg-slate-50 flex flex-col h-full overflow-y-auto">
+        <div className="p-6 border-b border-slate-200">
+          <h1 className="text-xl font-bold flex items-center gap-2 text-slate-800">
+            <Zap className="text-amber-500 w-5 h-5 fill-amber-500" /> Quant Terminal
+          </h1>
+          <p className="text-sm text-slate-500 font-medium mt-1 ml-7">V8.4 Premium</p>
         </div>
 
-        {/* Scrollable content area */}
-        <main className="flex-1 overflow-y-auto">
-          <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 py-6">
-            {/* Kite login / live data banner */}
-            <KiteLoginBanner
-              sessionState={sessionState}
-              userName={userName}
-              onRefresh={kiteRefresh}
-              onLogout={kiteLogout}
-              kiteApiKey={settings.kiteApiKey}
-              kiteApiSecret={settings.kiteApiSecret}
-            />
-
-            {/* Screening progress banner */}
-            {screening && (
-              <div className="mb-4 px-4 py-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900 rounded-xl">
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin flex-shrink-0" />
-                  <span className="text-sm font-semibold text-blue-800 dark:text-blue-300">
-                    Screening {screenProgress.done}/{screenProgress.total} stocks via Yahoo Finance...
-                  </span>
-                  {screenProgress.errors > 0 && (
-                    <span className="text-xs text-amber-600 dark:text-amber-400">
-                      ({screenProgress.errors} errors)
-                    </span>
-                  )}
-                </div>
-                <div className="w-full bg-blue-200 dark:bg-blue-900 rounded-full h-2">
-                  <div
-                    className="bg-blue-600 dark:bg-blue-400 h-2 rounded-full transition-all duration-300"
-                    style={{ width: `${screenProgress.total > 0 ? (screenProgress.done / screenProgress.total * 100) : 0}%` }}
-                  />
-                </div>
-                <p className="mt-1.5 text-xs text-blue-600 dark:text-blue-400">
-                  Fetching 3yr OHLCV + fundamentals → running V8.4 screener (RSI, structural strength, V4 signals)
-                </p>
-              </div>
-            )}
-
-            {/* Screening complete banner */}
-            {!screening && screenProgress.total > 0 && stocks.length > 0 && (
-              <div className="flex items-center gap-2 mb-4 px-4 py-2 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900 rounded-xl text-xs">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0" />
-                <span className="font-semibold text-emerald-700 dark:text-emerald-400">
-                  Screening complete — {stocks.length} stocks processed · {v4Count} V4 signals found
-                </span>
-                {screenProgress.errors > 0 && (
-                  <span className="text-amber-600 dark:text-amber-400">
-                    · {screenProgress.errors} failed (insufficient data or API error)
-                  </span>
-                )}
-              </div>
-            )}
-
-            {/* Snapshot banner for Kite/Dhan API modes */}
-            {sessionState.status === 'none' && LIVE_FETCH_TIME && stocks.length > 0 && settings.dataSource !== 'csv' && settings.dataSource !== 'mock' && (
-              <div className="flex items-center gap-2 mb-4 px-4 py-2 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-500 dark:text-slate-400">
-                <span className="w-1.5 h-1.5 rounded-full bg-slate-400 flex-shrink-0" />
-                Showing snapshot from {LIVE_FETCH_TIME}
-                <span className="ml-auto text-amber-600 dark:text-amber-400 font-medium">
-                  ⚠️ Login with Kite above to get today's data
-                </span>
-              </div>
-            )}
-
-            {/* Market Bar — shown on overview + screener */}
-            {(activeTab === 'overview' || activeTab === 'screener') && (
-              <MarketBar indices={isLiveData ? LIVE_INDICES : MOCK_INDICES} />
-            )}
-
-            {activeTab === 'overview' && (
-              <OverviewTab
-                stocks={stocks}
-                portfolio={portfolio}
-                onSelectTicker={setSelectedTicker}
-                onNavigateToTearSheet={navigateToTearSheet}
-              />
-            )}
-            {activeTab === 'screener' && (
-              <ScreenerTab
-                stocks={stocks}
-                portfolio={portfolio}
-                onAddToPortfolio={handleAddToPortfolio}
-                onSelectTicker={setSelectedTicker}
-                onNavigateToTearSheet={navigateToTearSheet}
-              />
-            )}
-            {activeTab === 'tearsheet' && (
-              <TearSheetTab
-                stocks={stocks}
-                selectedTicker={selectedTicker}
-                onSelectTicker={setSelectedTicker}
-                portfolio={portfolio}
-                onAddToPortfolio={handleAddToPortfolio}
-                isDark={isDark}
-                capitalPerTrade={settings.capitalPerTrade}
-              />
-            )}
-            {activeTab === 'ai' && (
-              <AICopilotTab
-                stocks={stocks}
-                geminiApiKey={settings.geminiApiKey}
-                onGeminiKeyChange={v => handleSettingsChange({ geminiApiKey: v })}
-              />
-            )}
+        <div className="p-6 border-b border-slate-200 space-y-4">
+          <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+            <Database className="w-3 h-3" /> Stock List
+          </h2>
+          <Button variant="outline" className="w-full justify-start gap-2 bg-white text-slate-600">
+            <Upload className="w-4 h-4 text-slate-400" /> Upload NSE CSV
+          </Button>
+          <p className="text-sm font-medium text-slate-700 pt-2">{LIVE_STOCKS.length} stocks loaded</p>
+          <div className="bg-blue-50/50 border border-blue-100 rounded-lg p-4 mt-2">
+            <p className="text-sm text-slate-700 mb-3 leading-snug">
+              Login with Kite daily to refresh real-time NSE data.
+            </p>
+            <Button className="w-full bg-[#FF5722] hover:bg-[#E64A19] text-white shadow-sm">
+              Login with Kite <ChevronRight className="w-4 h-4 ml-1" />
+            </Button>
           </div>
-        </main>
-      </div>
+        </div>
+
+        <div className="p-6 border-b border-slate-200 space-y-5">
+          <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+            <Settings2 className="w-3 h-3" /> Risk Settings
+          </h2>
+          <div className="space-y-2">
+            <label className="text-xs font-semibold text-slate-600">Capital Per Trade (₹)</label>
+            <Input defaultValue="33000" className="h-8 bg-white" />
+          </div>
+        </div>
+      </aside>
+
+      {/* ─── MAIN CONTENT ─── */}
+      <main className="flex-1 flex flex-col h-full bg-white relative">
+        <div className="absolute top-4 left-6 flex gap-3 z-10">
+          <Badge variant="outline" className="bg-slate-50 text-slate-600">{LIVE_STOCKS.length} Stocks</Badge>
+          <Badge className="bg-green-100 text-green-800 hover:bg-green-100 border-green-200">
+            {LIVE_STOCKS.filter(s => s.v4Signal).length} V4 Signals
+          </Badge>
+          <Badge variant="outline" className="bg-slate-50 text-slate-500">Data: {LIVE_FETCH_TIME}</Badge>
+        </div>
+
+        <Tabs defaultValue="overview" className="flex-1 flex flex-col h-full" onValueChange={setActiveTab}>
+          <div className="border-b border-slate-200 pt-3 px-6 flex justify-center">
+            <TabsList className="bg-transparent border-none w-full max-w-md justify-between">
+              <TabsTrigger value="overview" className="data-[state=active]:bg-slate-100 data-[state=active]:shadow-none rounded-t-lg rounded-b-none px-6">Overview</TabsTrigger>
+              <TabsTrigger value="screener" className="data-[state=active]:bg-slate-100 data-[state=active]:shadow-none rounded-t-lg rounded-b-none px-6">Full Screener</TabsTrigger>
+              <TabsTrigger value="tearsheet" className="data-[state=active]:bg-slate-100 data-[state=active]:shadow-none rounded-t-lg rounded-b-none px-6">Tear Sheet</TabsTrigger>
+            </TabsList>
+          </div>
+
+          {/* ─── OVERVIEW TAB ─── */}
+          <TabsContent value="overview" className="flex-1 overflow-y-auto p-8 m-0 outline-none">
+            {/* Market Indices */}
+            <div className="grid grid-cols-4 gap-4 mb-8">
+              {LIVE_INDICES.map((idx) => (
+                <Card key={idx.name} className="shadow-none border-slate-200 bg-slate-50/50">
+                  <CardContent className="p-4">
+                    <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">{idx.name}</p>
+                    <div className="flex items-baseline justify-between">
+                      <p className="text-xl font-bold text-slate-800">{idx.price.toLocaleString()}</p>
+                      <p className={`text-sm font-medium flex items-center ${idx.change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        {idx.change >= 0 ? <TrendingUp className="w-3 h-3 mr-1"/> : <TrendingDown className="w-3 h-3 mr-1"/>}
+                        {(idx.change * 100).toFixed(2)}%
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+
+            {/* Quick Filters */}
+            <div className="flex flex-wrap items-center justify-between mb-4 gap-4">
+              <div className="flex flex-wrap gap-2">
+                {['V4 Signals', 'Quality', 'Monopoly', 'Emerging', 'Momentum'].map((filterName) => (
+                  <Badge 
+                    key={filterName} 
+                    variant={overviewFilter === filterName ? 'default' : 'secondary'}
+                    className={`cursor-pointer px-3 py-1 text-xs font-medium transition-colors ${overviewFilter === filterName ? 'bg-slate-800 text-white hover:bg-slate-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                    onClick={() => setOverviewFilter(filterName)}
+                  >
+                    {filterName}
+                  </Badge>
+                ))}
+              </div>
+              <div className="relative w-64">
+                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
+                <Input 
+                  placeholder="Quick search..." 
+                  className="pl-9 h-9 bg-slate-50"
+                  value={overviewSearch}
+                  onChange={(e) => setOverviewSearch(e.target.value)}
+                />
+              </div>
+            </div>
+
+            {/* Anti-Squish Table Container */}
+            <div className="border border-slate-200 rounded-lg overflow-x-auto">
+              <table className="w-full text-sm text-left min-w-[800px]">
+                <thead className="bg-slate-50 border-b border-slate-200 text-xs text-slate-500 uppercase font-bold tracking-wider">
+                  <tr>
+                    <th className="px-4 py-3 whitespace-nowrap">Ticker</th>
+                    <th className="px-4 py-3 whitespace-nowrap">Rating</th>
+                    <th className="px-4 py-3 whitespace-nowrap">V4 Signal</th>
+                    <th className="px-4 py-3 whitespace-nowrap text-right">Price (₹)</th>
+                    <th className="px-4 py-3 whitespace-nowrap text-right">Change</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200">
+                  {overviewStocks.slice(0, 50).map((stock) => (
+                    <tr key={stock.ticker} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="px-4 py-3 font-bold text-slate-800 whitespace-nowrap">{stock.ticker}</td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <Badge className={`font-medium shadow-none ${getBadgeStyle(stock.rating)}`}>
+                          {stock.rating.replace(/['"🔴🟢🟡🔵👑⚠️]/g, '').trim()}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        {stock.v4Signal ? (
+                          <span className="text-green-600 font-bold flex items-center gap-1.5 text-xs bg-green-50 px-2 py-1 rounded-md w-fit border border-green-100">
+                            <Zap className="w-3 h-3 fill-green-600" /> PASS
+                          </span>
+                        ) : (<span className="text-slate-300">—</span>)}
+                      </td>
+                      <td className="px-4 py-3 text-right font-mono font-medium text-slate-700 whitespace-nowrap">
+                        {stock.price.toLocaleString(undefined, {minimumFractionDigits: 2})}
+                      </td>
+                      <td className={`px-4 py-3 text-right font-medium whitespace-nowrap ${stock.change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        {stock.change > 0 ? '+' : ''}{(stock.change * 100).toFixed(2)}%
+                      </td>
+                    </tr>
+                  ))}
+                  {overviewStocks.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-8 text-center text-slate-500">No stocks match the current filter.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </TabsContent>
+
+          {/* ─── SCREENER TAB ─── */}
+          <TabsContent value="screener" className="flex-1 flex flex-col p-8 m-0 outline-none overflow-hidden h-full">
+            <div className="flex flex-col gap-4 mb-4">
+              <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                <Filter className="w-5 h-5 text-blue-500" /> Master Database Screener
+              </h2>
+              
+              <div className="flex flex-wrap items-center justify-between bg-slate-50 border border-slate-200 p-3 rounded-xl gap-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-slate-400 mr-2 uppercase tracking-wider">Tier:</span>
+                  <select 
+                    className="text-sm bg-white border border-slate-200 rounded-md px-3 py-1.5 outline-none focus:ring-2 focus:ring-blue-500"
+                    value={screenerTier}
+                    onChange={(e) => setScreenerTier(e.target.value)}
+                  >
+                    <option value="All Tiers">All Tiers</option>
+                    <option value="👑 TIER 1: MONOPOLY">Tier 1: Monopoly</option>
+                    <option value="🟢 TIER 2: QUALITY">Tier 2: Quality</option>
+                    <option value="⚠️ TIER 2: PROVISIONAL (Missing Data)">Tier 2: Provisional</option>
+                    <option value="🟡 TIER 3: EMERGING">Tier 3: Emerging</option>
+                    <option value="🔵 TIER 4: MOMENTUM">Tier 4: Momentum</option>
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-4">
+                  <Button 
+                    variant={screenerV4Only ? "default" : "outline"}
+                    className={`h-8 px-3 text-xs gap-1.5 transition-all ${screenerV4Only ? 'bg-green-500 hover:bg-green-600 text-white border-green-500' : 'bg-white text-slate-600'}`}
+                    onClick={() => setScreenerV4Only(!screenerV4Only)}
+                  >
+                    <Zap className={`w-3.5 h-3.5 ${screenerV4Only ? 'fill-white' : ''}`} /> 
+                    {screenerV4Only ? 'V4 Signals Only' : 'Show All'}
+                  </Button>
+                  <div className="relative w-64">
+                    <Search className="absolute left-2.5 top-2 h-4 w-4 text-slate-400" />
+                    <Input 
+                      placeholder="Search ticker..." 
+                      className="pl-9 h-8 bg-white"
+                      value={screenerSearch}
+                      onChange={(e) => setScreenerSearch(e.target.value)}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-400 mb-2">{screenerStocks.length} records found</p>
+
+            <div className="flex-1 border border-slate-200 rounded-lg overflow-auto">
+              <table className="w-full text-sm text-left min-w-[1000px]">
+                <thead className="bg-slate-50 sticky top-0 z-10 shadow-sm text-xs text-slate-500 uppercase font-bold tracking-wider">
+                  <tr>
+                    <th className="px-4 py-3 whitespace-nowrap">Ticker</th>
+                    <th className="px-4 py-3 whitespace-nowrap">Sector</th>
+                    <th className="px-4 py-3 whitespace-nowrap">Rating</th>
+                    <th className="px-4 py-3 whitespace-nowrap">V4 Signal</th>
+                    <th className="px-4 py-3 whitespace-nowrap text-right">Price (₹)</th>
+                    <th className="px-4 py-3 whitespace-nowrap text-right">RSI</th>
+                    <th className="px-4 py-3 whitespace-nowrap text-right">1Y Return</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200">
+                  {screenerStocks.map((stock) => (
+                    <tr key={stock.ticker} className={`transition-colors ${stock.v4Signal ? "bg-green-50/40 hover:bg-green-50" : "hover:bg-slate-50/50"}`}>
+                      <td className="px-4 py-3 font-bold text-slate-800 whitespace-nowrap">{stock.ticker}</td>
+                      <td className="px-4 py-3 text-slate-500 text-xs whitespace-nowrap">{stock.sector}</td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <Badge className={`font-medium text-[11px] shadow-none ${getBadgeStyle(stock.rating)}`}>
+                          {stock.rating.replace(/['"🔴🟢🟡🔵👑⚠️]/g, '').trim()}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        {stock.v4Signal ? (
+                          <span className="text-green-600 font-bold flex items-center gap-1 text-[11px] bg-green-100 px-2 py-0.5 rounded border border-green-200 w-fit">
+                            <Zap className="w-3 h-3 fill-green-600" /> PASS
+                          </span>
+                        ) : (<span className="text-slate-300">—</span>)}
+                      </td>
+                      <td className="px-4 py-3 text-right font-mono font-medium text-slate-700 whitespace-nowrap">
+                        {stock.price.toLocaleString(undefined, {minimumFractionDigits: 2})}
+                      </td>
+                      <td className={`px-4 py-3 text-right font-mono font-medium whitespace-nowrap ${stock.rsi >= 70 ? 'text-red-500' : stock.rsi <= 40 ? 'text-blue-500' : 'text-slate-600'}`}>
+                        {stock.rsi.toFixed(1)}
+                      </td>
+                      <td className={`px-4 py-3 text-right font-mono font-medium whitespace-nowrap ${stock.ret1y >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        {stock.ret1y > 0 ? '+' : ''}{(stock.ret1y * 100).toFixed(1)}%
+                      </td>
+                    </tr>
+                  ))}
+                  {screenerStocks.length === 0 && (
+                    <tr>
+                      <td colSpan={7} className="px-4 py-12 text-center text-slate-500">No stocks match the current filters.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </TabsContent>
+
+          {/* ─── TEAR SHEET TAB (Placeholder) ─── */}
+          <TabsContent value="tearsheet" className="p-8 flex items-center justify-center h-full">
+            <div className="text-center text-slate-400">
+               <BarChart2 className="w-12 h-12 mx-auto mb-3 opacity-30" />
+               <p>Tear Sheet Component goes here.</p>
+            </div>
+          </TabsContent>
+
+        </Tabs>
+      </main>
     </div>
   );
 }
