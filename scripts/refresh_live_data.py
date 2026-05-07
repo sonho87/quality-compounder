@@ -2,13 +2,10 @@
 """
 refresh_live_data.py (React Backend Generator)
 ==============================================
-100% Parity with momentum_app_v2.py
+100% Parity with momentum_app_v2.py (V8.4 Master Formula)
 - Uses Kite MCP data files for historical price data.
 - Uses yfinance + curl_cffi for Fundamental data (ROE, Profit Growth, P/E).
 - Uses pure Pandas for exact RSI, ATR, and Drawdown calculations.
-
-MA200 NOTE: SMA-200 uses the last 200 closes ONLY. Pandas rolling(200).mean()
-naturally does this — it does NOT sum 250 items and divide by 200.
 """
 
 import json, math, os, sys, datetime
@@ -63,42 +60,38 @@ def calc_atr(df_ticker, period=14):
     return tr.rolling(period).mean()
 
 def detect_structural_strength(df):
-    """Structural Strength — V8.4 detect_structural_strength().
-
-    TWO conditions must BOTH pass (over last 250 trading days = 1 year):
-
-    (a) TREND INTACT: MA50 > MA200  AND  current close > MA200
-        Uses simple moving averages computed over the 1-year window.
-
-    (b) LIMITED DRAWDOWN: max drawdown from expanding max (closes only) > -25%.
-
-    This is the V8.4 formula — uses MA crossovers, NOT quarterly rising highs.
+    """
+    V8.4 Structural Strength:
+    1. Trend Intact: Current Close > MA200 AND MA50 > MA200
+    2. Limited Drawdown: Current Price / 1-Year Max Price - 1 > -0.25
     """
     if len(df) < 250:
         return False
 
-    one_year = df['close'].tail(250)
+    one_year_closes = df['close'].tail(250)
+    one_year_highs = df['high'].tail(252)
 
     # (a) Trend intact: MA50 > MA200 AND current close > MA200
-    ma_50 = one_year.rolling(50).mean().iloc[-1]
-    ma_200 = one_year.rolling(200).mean().iloc[-1]
-    current_close = one_year.iloc[-1]
+    ma_50 = one_year_closes.rolling(50).mean().iloc[-1]
+    ma_200 = one_year_closes.rolling(200).mean().iloc[-1]
+    current_close = one_year_closes.iloc[-1]
+    
     trend_intact = (current_close > ma_200) and (ma_50 > ma_200)
     if not trend_intact:
         return False
 
-    # (b) Max drawdown from expanding max (closes only)
-    rolling_max = one_year.expanding().max()
-    drawdown    = (one_year / rolling_max) - 1
-    max_dd      = drawdown.min()
-    return max_dd > -0.25
+    # (b) Max drawdown from the 1-year high (Master Formula Fix)
+    year_max_high = one_year_highs.max()
+    current_drawdown = (current_close / year_max_high) - 1
+    
+    return current_drawdown > -0.25
 
 # ─── EXACT V4 FUNDAMENTALS LOGIC ────────────────────────────────────────────
 
 def safe_get_fundamentals(full_ticker):
     fundamentals = {
         "pe": None, "roe": None, "profit_growth": None,
-        "consistent_growth": None,   # None = bypass (OHLCV-only mode)
+        "consistent_growth": None,
         "missing": True, "mcap": "N/A"
     }
     try:
@@ -136,10 +129,7 @@ def safe_get_fundamentals(full_ticker):
 
 def classify_compounder(ret_6m, ret_1y, ret_3y, structural,
                         consistent_growth=None, roe=None, missing_fundamentals=False):
-    """V8.4 classify_compounder — 5-tier classification.
-    missing_fundamentals=True → PROVISIONAL score 4 (pure technical breakouts aren't hidden).
-    consistent_growth / roe = None → bypass (OHLCV-only mode).
-    ROE from yfinance is a fraction (e.g. 0.213), spec threshold is >15% = 0.15."""
+    """V8.4 classify_compounder — 5-tier classification."""
     if not structural:
         return "🔴 TIER 5: CHOPPY", 0
 
@@ -147,7 +137,6 @@ def classify_compounder(ret_6m, ret_1y, ret_3y, structural,
     if missing_fundamentals:
         return "⚠️ TIER 2: PROVISIONAL (Missing Data)", 4
 
-    # When data is unavailable, bypass the condition (treat as satisfied)
     growth_ok = consistent_growth is None or consistent_growth
     roe_ok    = roe is None or (pd.notna(roe) and roe > 0.15)
 
@@ -221,7 +210,7 @@ def generate_live_data():
         sys.exit(1)
 
     stocks = []
-    print("\n📊 Running 100% Parity V4 Screener on live data...")
+    print("\n📊 Running 100% Parity V8.4 Screener on live data...")
     print(f"{'TICKER':15s} {'PRICE':>9s}  {'RSI':>6s}  {'1Y RET':>8s}  {'RATING':25s}  V4")
     print("─" * 85)
 
@@ -262,13 +251,13 @@ def generate_live_data():
         # V4 Signal — ALL 5 rules must pass (spec §5)
         is_breakout  = current_price >= (high52 * 0.95)             # Rule 2: Proximity
         is_vol_surge = df['volume'].tail(3).max() >= (1.5 * avg_vol_20)  # Rule 3: Volume surge
-        is_rsi_valid = 50 <= rsi <= 75                               # Rule 4: RSI 50<=rsi<=75 (INCLUSIVE, V8.4)
+        is_rsi_valid = 50 <= rsi <= 75                               # Rule 4: RSI 50<=rsi<=75
         is_liquid    = traded_val_lakhs >= 50                       # Rule 1: Liquidity
         is_quality   = score >= 4                                   # Rule 5: Tier 4 or 5
 
         v4_signal = is_breakout and is_vol_surge and is_rsi_valid and is_liquid and is_quality
 
-        # Smart Entry limit order price (Bug 5 fix)
+        # Smart Entry limit order price
         entry_limit = round(current_price * 1.005, 2)
 
         # Risk management
