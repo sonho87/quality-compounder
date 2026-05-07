@@ -88,12 +88,19 @@ def detect_structural_strength(df):
 
 # ─── EXACT V4 FUNDAMENTALS LOGIC ────────────────────────────────────────────
 
+import time
+import random
+
 def safe_get_fundamentals(full_ticker):
     fundamentals = {
         "pe": None, "roe": None, "profit_growth": None,
         "consistent_growth": None,
         "missing": True, "mcap": "N/A"
     }
+    
+    # 🔥 ANTI-BAN DELAY: Wait 0.2 to 0.6 seconds between each stock to trick Yahoo
+    time.sleep(random.uniform(0.2, 0.6))
+    
     try:
         tkr = yf.Ticker(full_ticker, session=yf_session)
         info = tkr.info
