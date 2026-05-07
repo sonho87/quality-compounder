@@ -4,11 +4,11 @@ refresh_live_data.py (React Backend Generator)
 ==============================================
 100% Parity with momentum_app_v2.py (V8.4 Master Formula)
 - Uses Kite MCP data files for historical price data.
-- Uses yfinance + curl_cffi for Fundamental data (ROE, Profit Growth, P/E).
-- Uses pure Pandas for exact RSI, ATR, and Drawdown calculations.
+- Uses yfinance + curl_cffi for Fundamental data.
+- INCLUDES PERSISTENT CACHING to prevent Yahoo Finance IP bans.
 """
 
-import json, math, os, sys, datetime
+import json, math, os, sys, datetime, time, random
 import pandas as pd
 import numpy as np
 import yfinance as yf
@@ -19,6 +19,7 @@ CLAUDE_PROJECTS_BASE = os.path.expanduser(
     "~/.claude/projects/-Users-rakesh-Desktop-Momentum-trade-Claude-Momentum-Design--claude-worktrees-unruffled-goldstine-de5cbe"
 )
 OUTPUT_TS = os.path.join(os.path.dirname(__file__), '..', 'src', 'lib', 'liveData.ts')
+CACHE_FILE = os.path.join(os.path.dirname(__file__), 'fundamentals_cache.json')
 CAPITAL = 33000
 
 INSTRUMENTS = {
@@ -39,11 +40,28 @@ SECTORS = {
     "LT": "Infrastructure", "COALINDIA": "Energy", "POWERGRID": "Utilities", "NTPC": "Utilities",
 }
 
-# --- ANTI-BLOCKING BROWSER SPOOFER (From V4) ---
 yf_session = curl_requests.Session(impersonate="chrome")
 
-# ─── EXACT V4 PANDAS INDICATOR MATH ─────────────────────────────────────────
+# ─── CACHE MANAGER ──────────────────────────────────────────────────────────
+def load_cache():
+    if os.path.exists(CACHE_FILE):
+        try:
+            with open(CACHE_FILE, 'r') as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
 
+def save_cache(cache_data):
+    try:
+        with open(CACHE_FILE, 'w') as f:
+            json.dump(cache_data, f, indent=4)
+    except Exception as e:
+        print(f"Warning: Could not save cache: {e}")
+
+FUND_CACHE = load_cache()
+
+# ─── EXACT V4 PANDAS INDICATOR MATH ─────────────────────────────────────────
 def calc_rsi(series, period=14):
     delta = series.diff()
     gain = (delta.where(delta > 0, 0)).fillna(0)
@@ -60,18 +78,12 @@ def calc_atr(df_ticker, period=14):
     return tr.rolling(period).mean()
 
 def detect_structural_strength(df):
-    """
-    V8.4 Structural Strength:
-    1. Trend Intact: Current Close > MA200 AND MA50 > MA200
-    2. Limited Drawdown: Current Price / 1-Year Max Price - 1 > -0.25
-    """
     if len(df) < 250:
         return False
 
     one_year_closes = df['close'].tail(250)
     one_year_highs = df['high'].tail(252)
 
-    # (a) Trend intact: MA50 > MA200 AND current close > MA200
     ma_50 = one_year_closes.rolling(50).mean().iloc[-1]
     ma_200 = one_year_closes.rolling(200).mean().iloc[-1]
     current_close = one_year_closes.iloc[-1]
@@ -80,26 +92,24 @@ def detect_structural_strength(df):
     if not trend_intact:
         return False
 
-    # (b) Max drawdown from the 1-year high (Master Formula Fix)
     year_max_high = one_year_highs.max()
     current_drawdown = (current_close / year_max_high) - 1
     
     return current_drawdown > -0.25
 
-# ─── EXACT V4 FUNDAMENTALS LOGIC ────────────────────────────────────────────
-
-import time
-import random
-
+# ─── EXACT V4 FUNDAMENTALS LOGIC WITH CACHING ───────────────────────────────
 def safe_get_fundamentals(full_ticker):
+    # 1. Return from cache if we already have it (and it didn't previously fail)
+    if full_ticker in FUND_CACHE and not FUND_CACHE[full_ticker].get("missing", True):
+        return FUND_CACHE[full_ticker]
+
     fundamentals = {
         "pe": None, "roe": None, "profit_growth": None,
-        "consistent_growth": None,
-        "missing": True, "mcap": "N/A"
+        "consistent_growth": None, "missing": True, "mcap": "N/A"
     }
     
-    # 🔥 ANTI-BAN DELAY: Wait 0.2 to 0.6 seconds between each stock to trick Yahoo
-    time.sleep(random.uniform(0.2, 0.6))
+    # 2. Add an anti-ban delay before pinging Yahoo Finance
+    time.sleep(random.uniform(0.5, 1.5))
     
     try:
         tkr = yf.Ticker(full_ticker, session=yf_session)
@@ -130,43 +140,42 @@ def safe_get_fundamentals(full_ticker):
                         fundamentals["consistent_growth"] = sum(1 for g in growth_rates if g > 0) >= 2
 
         fundamentals["missing"] = False
+        
+        # 3. Save successful fetch to local cache file
+        FUND_CACHE[full_ticker] = fundamentals
+        save_cache(FUND_CACHE)
+        
     except Exception:
         pass
+        
     return fundamentals
 
 def classify_compounder(ret_6m, ret_1y, ret_3y, structural,
                         consistent_growth=None, roe=None, missing_fundamentals=False):
-    """V8.4 classify_compounder — 5-tier classification."""
     if not structural:
         return "🔴 TIER 5: CHOPPY", 0
 
-    # PROVISIONAL: missing fundamentals get score 4 so they can pass V4 quality check
     if missing_fundamentals:
         return "⚠️ TIER 2: PROVISIONAL (Missing Data)", 4
 
     growth_ok = consistent_growth is None or consistent_growth
     roe_ok    = roe is None or (pd.notna(roe) and roe > 0.15)
 
-    # Tier 1: Monopoly
     if pd.notna(ret_3y) and ret_3y >= 1.50 and growth_ok and roe_ok:
         return "👑 TIER 1: MONOPOLY", 5
 
-    # Tier 2: Quality
     if pd.notna(ret_1y) and ret_1y >= 0.40 and growth_ok:
         return "🟢 TIER 2: QUALITY", 4
 
-    # Tier 3: Emerging
     if pd.notna(ret_6m) and ret_6m >= 0.30 and growth_ok:
         return "🟡 TIER 3: EMERGING", 3
 
-    # Tier 4: Momentum (ignores growth/fundamentals)
     if pd.notna(ret_6m) and ret_6m >= 0.30:
         return "🔵 TIER 4: MOMENTUM", 2
 
     return "🔴 TIER 5: WEAK", 0
 
 # ─── DATA FETCHING ──────────────────────────────────────────────────────────
-
 def find_latest_files():
     token_to_file = {}
     if not os.path.exists(CLAUDE_PROJECTS_BASE): return {}
@@ -205,15 +214,13 @@ def match_files_to_tickers(all_files, instruments):
     return matched
 
 # ─── MAIN ENGINE ────────────────────────────────────────────────────────────
-
 def generate_live_data():
     print("🔍 Scanning for Kite MCP data files...")
     all_files = find_latest_files()
-    print(f"   Found {len(all_files)} total historical data files across all sessions")
-
+    
     ticker_bars = match_files_to_tickers(all_files, INSTRUMENTS)
     if not ticker_bars:
-        print("❌ No matching Kite data found. Please fetch data via Kite MCP first.")
+        print("❌ No matching Kite data found.")
         sys.exit(1)
 
     stocks = []
@@ -223,10 +230,8 @@ def generate_live_data():
 
     for ticker, bars in ticker_bars.items():
         if len(bars) < 252:
-            print(f"⚠️  {ticker}: only {len(bars)} bars — skip")
             continue
 
-        # Convert Kite JSON to Pandas DataFrame
         df = pd.DataFrame(bars)
 
         current_price = df['close'].iloc[-1]
@@ -244,30 +249,24 @@ def generate_live_data():
         ret_1y = (current_price / df['close'].iloc[-250] - 1) if len(df) >= 250 else float('nan')
         ret_3y = (current_price / df['close'].iloc[-700] - 1) if len(df) >= 700 else float('nan')
 
-        # Fundamentals from Yahoo via stealth session
         fund       = safe_get_fundamentals(f"{ticker}.NS")
         structural = detect_structural_strength(df)
 
-        # 5-tier classification
         rating, score = classify_compounder(
             ret_6m, ret_1y, ret_3y, structural,
             fund['consistent_growth'], fund['roe'],
             missing_fundamentals=fund['missing']
         )
 
-        # V4 Signal — ALL 5 rules must pass (spec §5)
-        is_breakout  = current_price >= (high52 * 0.95)             # Rule 2: Proximity
-        is_vol_surge = df['volume'].tail(3).max() >= (1.5 * avg_vol_20)  # Rule 3: Volume surge
-        is_rsi_valid = 50 <= rsi <= 75                               # Rule 4: RSI 50<=rsi<=75
-        is_liquid    = traded_val_lakhs >= 50                       # Rule 1: Liquidity
-        is_quality   = score >= 4                                   # Rule 5: Tier 4 or 5
+        is_breakout  = current_price >= (high52 * 0.95)             
+        is_vol_surge = df['volume'].tail(3).max() >= (1.5 * avg_vol_20)  
+        is_rsi_valid = 50 <= rsi <= 75                               
+        is_liquid    = traded_val_lakhs >= 50                       
+        is_quality   = score >= 4                                   
 
         v4_signal = is_breakout and is_vol_surge and is_rsi_valid and is_liquid and is_quality
 
-        # Smart Entry limit order price
         entry_limit = round(current_price * 1.005, 2)
-
-        # Risk management
         stop_pct = max(0.03, min(0.06, (1.5 * current_atr) / current_price))
         stop     = current_price * (1 - stop_pct)
         t1       = current_price + (1.5 * current_atr)
@@ -304,13 +303,7 @@ def generate_live_data():
         print(f"{ticker:15s} ₹{current_price:>9.2f}  {rsi:6.1f}  {ret1_str:>8s}  {rating:25s}  {v4_str}")
 
     v4_count = sum(1 for s in stocks if s['v4Signal'])
-    monopoly = sum(1 for s in stocks if s['rating'] == '👑 TIER 1: MONOPOLY')
-    quality  = sum(1 for s in stocks if s['rating'] == '🟢 TIER 2: QUALITY')
-    emerging = sum(1 for s in stocks if s['rating'] == '🟡 TIER 3: EMERGING')
-    momentum = sum(1 for s in stocks if s['rating'] == '🔵 TIER 4: MOMENTUM')
-    print(f"\n📈 Results: {len(stocks)} stocks · {monopoly} Monopoly · {quality} Quality · {emerging} Emerging · {momentum} Momentum · {v4_count} V4 signals")
-
-    # ── Write TypeScript file for React Frontend ──────────────────────────
+    
     now = datetime.datetime.now().strftime('%d %b %Y, %H:%M IST')
     def jb(v): return 'true' if v else 'false'
     def fmt_num(v): return str(v) if v is not None and not (isinstance(v, float) and math.isnan(v)) else 'null'
@@ -319,8 +312,7 @@ def generate_live_data():
         "import type { StockResult, MarketIndex } from './types';",
         "",
         "// AUTO-GENERATED — Kite API + yFinance Fundamentals",
-        f"// Fetched: {now}  |  V8.4 Quant Terminal: 5-tier, MA crossover structural, RSI 50<=rsi<=75",
-        "// DO NOT edit manually — re-run: python3 scripts/refresh_live_data.py",
+        f"// Fetched: {now}  |  V8.4 Quant Terminal",
         "",
         f"export const LIVE_FETCH_TIME = '{now}';",
         "",
@@ -368,10 +360,3 @@ def generate_live_data():
 
 if __name__ == '__main__':
     v4_count = generate_live_data()
-    print("\n─────────────────────────────────────────")
-    print("Next steps:")
-    print("  git add src/lib/liveData.ts")
-    print("  git commit -m 'chore: refresh live data'")
-    print("  git push  ← triggers Vercel auto-deploy")
-    if v4_count > 0:
-        print(f"\n  🚨 {v4_count} V4 SIGNAL(S) ACTIVE — check the dashboard!")
