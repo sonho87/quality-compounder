@@ -233,10 +233,11 @@ function parseScreenerHTML(html: string): Fundamentals {
   };
 
   try {
-    // Helper: extract a number after a label in the "Company Ratios" / top section
+    // Helper: extract a number from a Screener.in <li> block
+    // HTML structure: <li><span class="name">Label</span><span class="nowrap value">...<span class="number">123</span>...</span></li>
+    // Constrain match to within 200 chars of label to avoid cross-<li> leaks
     const extractNum = (label: string): number | null => {
-      // Screener uses: <span class="name">Stock P/E</span>\n<span class="number">25.6</span>
-      const regex = new RegExp(label + '[\\s\\S]*?<span[^>]*class="number"[^>]*>([\\d,.]+)', 'i');
+      const regex = new RegExp(label + '[\\s\\S]{0,200}?<span[^>]*class="number"[^>]*>([\\d,.]+)', 'i');
       const m = html.match(regex);
       if (!m) return null;
       const val = parseFloat(m[1].replace(/,/g, ''));
