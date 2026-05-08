@@ -115,7 +115,7 @@ function classifyCompounder(
   return { rating: '🔴 TIER 5: WEAK', score: 0 };
 }
 
-// V8.4 V4 Signal — RSI INCLUSIVE
+// V8.4 V4 Signal — RSI STRICT (50 < rsi < 75)
 function calcV4(
   price: number, high52w: number, volumes: number[],
   rsi: number, tradedVal: number, score: number
@@ -124,7 +124,7 @@ function calcV4(
   if (price < high52w * 0.95) return false;
   const avgVol20 = volumes.slice(-20).reduce((a, b) => a + b, 0) / 20;
   if (Math.max(...volumes.slice(-3)) < 1.5 * avgVol20) return false;
-  if (rsi < 50 || rsi > 75) return false;
+  if (rsi <= 50 || rsi >= 75) return false;
   if (score < 4) return false;
   return true;
 }
@@ -187,54 +187,100 @@ async function fetchYahooOHLCV(symbol: string): Promise<Bar[]> {
   return bars;
 }
 
-// Fetch fundamentals from Yahoo Finance v10 quoteSummary API
-async function fetchYahooFundamentals(symbol: string): Promise<Fundamentals> {
+// Fetch fundamentals from Screener.in (scraping HTML)
+// Screener.in doesn't block server IPs like Yahoo Finance does
+async function fetchScreenerFundamentals(ticker: string): Promise<Fundamentals> {
   const defaults: Fundamentals = {
     sector: 'N/A', mcap: 'N/A', pe: null, roe: null,
     bookVal: 'N/A', divYield: 'N/A', consistentGrowth: null, missing: true,
   };
 
   try {
-    // Use the v10 quoteSummary modules for fundamentals
-    const url = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}`
-      + `?modules=defaultKeyStatistics,financialData,summaryDetail,assetProfile`;
+    // Strip .NS/.BO suffix for Screener.in URL
+    const cleanTicker = ticker.replace(/\.(NS|BO)$/i, '');
+    const url = `https://www.screener.in/company/${cleanTicker}/consolidated/`;
 
     const res = await fetch(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml',
       },
     });
 
-    if (!res.ok) return defaults;
+    // Try standalone if consolidated 404s
+    if (res.status === 404) {
+      const res2 = await fetch(`https://www.screener.in/company/${cleanTicker}/`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'text/html',
+        },
+      });
+      if (!res2.ok) return defaults;
+      return parseScreenerHTML(await res2.text());
+    }
 
-    const json = await res.json() as {
-      quoteSummary?: {
-        result?: [{
-          defaultKeyStatistics?: { returnOnEquity?: { raw?: number }; bookValue?: { raw?: number } };
-          financialData?: { returnOnEquity?: { raw?: number } };
-          summaryDetail?: { trailingPE?: { raw?: number }; dividendYield?: { raw?: number }; marketCap?: { raw?: number } };
-          assetProfile?: { sector?: string };
-        }];
-      };
+    if (!res.ok) return defaults;
+    return parseScreenerHTML(await res.text());
+  } catch {
+    return defaults;
+  }
+}
+
+function parseScreenerHTML(html: string): Fundamentals {
+  const defaults: Fundamentals = {
+    sector: 'N/A', mcap: 'N/A', pe: null, roe: null,
+    bookVal: 'N/A', divYield: 'N/A', consistentGrowth: null, missing: true,
+  };
+
+  try {
+    // Helper: extract a number after a label in the "Company Ratios" / top section
+    const extractNum = (label: string): number | null => {
+      // Screener uses: <span class="name">Stock P/E</span>\n<span class="number">25.6</span>
+      const regex = new RegExp(label + '[\\s\\S]*?<span[^>]*class="number"[^>]*>([\\d,.]+)', 'i');
+      const m = html.match(regex);
+      if (!m) return null;
+      const val = parseFloat(m[1].replace(/,/g, ''));
+      return isNaN(val) ? null : val;
     };
 
-    const r = json.quoteSummary?.result?.[0];
-    if (!r) return defaults;
+    // Extract sector from breadcrumb or company heading
+    const sectorMatch = html.match(/class="sub-heading"[^>]*>\s*<a[^>]*>([^<]+)/i);
+    const sector = sectorMatch ? sectorMatch[1].trim() : 'N/A';
 
-    const sector = r.assetProfile?.sector ?? 'N/A';
-    const pe = r.summaryDetail?.trailingPE?.raw ?? null;
-    const roe = r.defaultKeyStatistics?.returnOnEquity?.raw ?? r.financialData?.returnOnEquity?.raw ?? null;
-    const mcapRaw = r.summaryDetail?.marketCap?.raw ?? 0;
-    const mcap = mcapRaw > 0 ? `₹${Math.round(mcapRaw / 10000000)} Cr` : 'N/A';
-    const bv = r.defaultKeyStatistics?.bookValue?.raw;
-    const bookVal = bv != null ? `₹${bv.toFixed(0)}` : 'N/A';
-    const dy = r.summaryDetail?.dividendYield?.raw;
-    const divYield = dy != null ? `${(dy * 100).toFixed(2)}%` : '0.00%';
+    // Market Cap (in Cr)
+    const mcapMatch = html.match(/Market\s*Cap[^<]*<[^>]*>[\s\S]*?<span[^>]*class="number"[^>]*>([\d,.]+)/i);
+    let mcap = 'N/A';
+    if (mcapMatch) {
+      const mcapVal = parseFloat(mcapMatch[1].replace(/,/g, ''));
+      if (!isNaN(mcapVal)) mcap = `₹${Math.round(mcapVal)} Cr`;
+    }
+
+    const pe = extractNum('Stock P/E');
+    const roe = extractNum('ROE');
+    const roeDecimal = roe !== null ? roe / 100 : null; // Screener shows % value, convert to fraction
+
+    // Book Value
+    const bvNum = extractNum('Book Value');
+    const bookVal = bvNum !== null ? `₹${Math.round(bvNum)}` : 'N/A';
+
+    // Dividend Yield
+    const dyNum = extractNum('Dividend Yield');
+    const divYield = dyNum !== null ? `${dyNum.toFixed(2)}%` : '0.00%';
+
+    // Consistent Growth: check if 3-year profit CAGR is positive
+    const profitGrowthMatch = html.match(/Profit\s*Growth[^<]*(?:3\s*Years?|CAGR)[^<]*<[^>]*>[\s\S]*?<span[^>]*class="number"[^>]*>([-\d,.]+)/i);
+    let consistentGrowth: boolean | null = null;
+    if (profitGrowthMatch) {
+      const pg = parseFloat(profitGrowthMatch[1].replace(/,/g, ''));
+      consistentGrowth = !isNaN(pg) ? pg > 0 : null;
+    }
+
+    const hasSomeData = pe !== null || roeDecimal !== null || mcap !== 'N/A';
 
     return {
-      sector, mcap, pe, roe, bookVal, divYield,
-      consistentGrowth: null, // Would need quarterly_financials — skip for speed
-      missing: false,
+      sector, mcap, pe, roe: roeDecimal, bookVal, divYield,
+      consistentGrowth,
+      missing: !hasSomeData,
     };
   } catch {
     return defaults;
@@ -349,7 +395,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const fullSymbol = sym.endsWith('.NS') || sym.endsWith('.BO') ? sym : `${sym}.NS`;
       const [bars, fund] = await Promise.all([
         fetchYahooOHLCV(fullSymbol),
-        fetchYahooFundamentals(fullSymbol),
+        fetchScreenerFundamentals(fullSymbol),
       ]);
       return screenStock(fullSymbol, bars, fund, capital);
     })

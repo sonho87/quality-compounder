@@ -260,7 +260,7 @@ def generate_live_data():
 
         is_breakout  = current_price >= (high52 * 0.95)             
         is_vol_surge = df['volume'].tail(3).max() >= (1.5 * avg_vol_20)  
-        is_rsi_valid = 50 <= rsi <= 75                               
+        is_rsi_valid = 50 < rsi < 75
         is_liquid    = traded_val_lakhs >= 50                       
         is_quality   = score >= 4                                   
 

@@ -1,318 +1,354 @@
-import React, { useState } from 'react';
-import { 
-  Zap, Database, Settings2, Key, ChevronRight, Upload, 
-  Search, TrendingUp, TrendingDown, Filter, BarChart2 
-} from 'lucide-react';
+import { useState, useCallback, useRef } from 'react';
+import { Zap, Printer, Upload, Trash2, IndianRupee, ChevronDown, ChevronRight, BarChart2 } from 'lucide-react';
+import type { StockResult, PortfolioPosition } from '@/lib/types';
+import { parseCSVSymbols } from '@/lib/api';
+import OverviewTab from '@/components/tabs/OverviewTab';
+import ScreenerTab from '@/components/tabs/ScreenerTab';
+import TearSheetTab from '@/components/tabs/TearSheetTab';
 
-// Import your data (make sure the paths match your project)
-import { LIVE_STOCKS, LIVE_INDICES, LIVE_FETCH_TIME } from '@/lib/liveData';
+// ─── DEFAULT SETTINGS ─────────────────────────────────────────────────────────
+const DEFAULT_SETTINGS = {
+  capitalPerTrade: 33000,
+  minTradeValLakhs: 50,
+};
 
-// If you are using Shadcn UI, ensure these imports work, otherwise replace with standard div/button tags
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
+type TabId = 'overview' | 'screener' | 'tearsheet';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('overview');
-  
-  // Screener State
-  const [screenerSearch, setScreenerSearch] = useState('');
-  const [screenerTier, setScreenerTier] = useState('All Tiers');
-  const [screenerV4Only, setScreenerV4Only] = useState(false);
+  // ─── STATE ────────────────────────────────────────────────────────────────────
+  const [stocks, setStocks] = useState<StockResult[]>([]);
+  const [portfolio, setPortfolio] = useState<PortfolioPosition[]>([]);
+  const [activeTab, setActiveTab] = useState<TabId>('overview');
+  const [selectedTicker, setSelectedTicker] = useState('');
+  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const [screening, setScreening] = useState(false);
+  const [screenProgress, setScreenProgress] = useState({ done: 0, total: 0 });
+  const [csvLoaded, setCsvLoaded] = useState(false);
+  const [csvError, setCsvError] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Overview State
-  const [overviewSearch, setOverviewSearch] = useState('');
-  const [overviewFilter, setOverviewFilter] = useState('V4 Signals');
+  // ─── SIDEBAR SECTIONS ─────────────────────────────────────────────────────────
+  const [sectionsOpen, setSectionsOpen] = useState({ stockList: true, risk: true, integrations: false });
+  const toggleSection = (key: keyof typeof sectionsOpen) =>
+    setSectionsOpen(prev => ({ ...prev, [key]: !prev[key] }));
 
-  // --- FILTER LOGIC ---
-  const overviewStocks = LIVE_STOCKS.filter((stock) => {
-    if (overviewSearch && !stock.ticker.toLowerCase().includes(overviewSearch.toLowerCase())) return false;
-    if (overviewFilter === 'V4 Signals') return stock.v4Signal;
-    if (overviewFilter === 'Quality') return stock.rating.includes('TIER 2') || stock.rating.includes('QUALITY');
-    if (overviewFilter === 'Monopoly') return stock.rating.includes('TIER 1');
-    if (overviewFilter === 'Emerging') return stock.rating.includes('TIER 3');
-    if (overviewFilter === 'Momentum') return stock.rating.includes('TIER 4');
-    return true;
-  });
+  // ─── SCREENING PIPELINE ───────────────────────────────────────────────────────
+  const screenSymbols = useCallback(async (symbols: string[]) => {
+    setScreening(true);
+    setScreenProgress({ done: 0, total: symbols.length });
+    setStocks([]);
+    setCsvError('');
 
-  const screenerStocks = LIVE_STOCKS.filter((stock) => {
-    if (screenerSearch && !stock.ticker.toLowerCase().includes(screenerSearch.toLowerCase())) return false;
-    if (screenerTier !== 'All Tiers' && stock.rating !== screenerTier) return false;
-    if (screenerV4Only && !stock.v4Signal) return false;
-    return true;
-  });
+    const BATCH_SIZE = 10;
+    const allResults: StockResult[] = [];
 
-  // Helper to colorize badges based on Tier
-  const getBadgeStyle = (rating: string) => {
-    if (rating.includes('TIER 1')) return 'bg-amber-100 text-amber-800 border-amber-200';
-    if (rating.includes('TIER 2')) return 'bg-green-100 text-green-800 border-green-200';
-    if (rating.includes('PROVISIONAL')) return 'bg-yellow-100 text-yellow-800 border-yellow-200';
-    if (rating.includes('TIER 3')) return 'bg-yellow-50 text-yellow-700 border-yellow-100';
-    if (rating.includes('TIER 4')) return 'bg-blue-100 text-blue-800 border-blue-200';
-    return 'bg-slate-100 text-slate-600 border-slate-200';
+    for (let i = 0; i < symbols.length; i += BATCH_SIZE) {
+      const batch = symbols.slice(i, i + BATCH_SIZE);
+      try {
+        const res = await fetch('/api/yahoo-screen', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbols: batch, capital: settings.capitalPerTrade }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.results) {
+            allResults.push(...data.results);
+            setStocks([...allResults]);
+          }
+        }
+      } catch (err) {
+        console.error('Batch error:', err);
+      }
+      setScreenProgress({ done: Math.min(i + BATCH_SIZE, symbols.length), total: symbols.length });
+    }
+
+    setScreening(false);
+    setCsvLoaded(true);
+    if (allResults.length > 0 && !selectedTicker) {
+      setSelectedTicker(allResults[0].ticker);
+    }
+  }, [settings.capitalPerTrade, selectedTicker]);
+
+  // ─── CSV UPLOAD ───────────────────────────────────────────────────────────────
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setCsvError('');
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const symbols = parseCSVSymbols(ev.target?.result as string);
+        if (symbols.length === 0) throw new Error('No valid symbols found');
+        screenSymbols(symbols);
+      } catch (err) {
+        setCsvError((err as Error).message);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
   };
 
+  // ─── PORTFOLIO ────────────────────────────────────────────────────────────────
+  const addToPortfolio = (stock: StockResult) => {
+    if (portfolio.some(p => p.ticker === stock.ticker)) return;
+    setPortfolio(prev => [...prev, {
+      ticker: stock.ticker,
+      entryPrice: stock.price,
+      shares: stock.shares,
+      investment: stock.investment,
+      currentPrice: stock.price,
+      target1: stock.target1,
+      target2: stock.target2,
+      stop: stock.stop,
+      addedAt: new Date().toISOString(),
+    }]);
+  };
+
+  // ─── CLEAR / RESET ────────────────────────────────────────────────────────────
+  const handleClear = () => {
+    setStocks([]);
+    setPortfolio([]);
+    setCsvLoaded(false);
+    setCsvError('');
+    setSelectedTicker('');
+    setScreenProgress({ done: 0, total: 0 });
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  // ─── PRINT / EXPORT ──────────────────────────────────────────────────────────
+  const handlePrint = () => {
+    window.print();
+  };
+
+  // ─── NAVIGATION ───────────────────────────────────────────────────────────────
+  const navigateToTearSheet = () => setActiveTab('tearsheet');
+
+  const v4Count = stocks.filter(s => s.v4Signal).length;
+
+  const tabs: { id: TabId; label: string }[] = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'screener', label: 'Full Screener' },
+    { id: 'tearsheet', label: 'Tear Sheet' },
+  ];
+
   return (
-    <div className="flex h-screen w-full bg-white font-sans text-slate-900 overflow-hidden">
-      
+    <div className="flex h-screen w-full bg-white text-slate-900 overflow-hidden print:overflow-visible print:h-auto">
+
       {/* ─── LEFT SIDEBAR ─── */}
-      <aside className="w-80 flex-shrink-0 border-r border-slate-200 bg-slate-50 flex flex-col h-full overflow-y-auto">
-        <div className="p-6 border-b border-slate-200">
-          <h1 className="text-xl font-bold flex items-center gap-2 text-slate-800">
-            <Zap className="text-amber-500 w-5 h-5 fill-amber-500" /> Quant Terminal
-          </h1>
-          <p className="text-sm text-slate-500 font-medium mt-1 ml-7">V8.4 Premium</p>
-        </div>
-
-        <div className="p-6 border-b border-slate-200 space-y-4">
-          <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
-            <Database className="w-3 h-3" /> Stock List
-          </h2>
-          <Button variant="outline" className="w-full justify-start gap-2 bg-white text-slate-600">
-            <Upload className="w-4 h-4 text-slate-400" /> Upload NSE CSV
-          </Button>
-          <p className="text-sm font-medium text-slate-700 pt-2">{LIVE_STOCKS.length} stocks loaded</p>
-          <div className="bg-blue-50/50 border border-blue-100 rounded-lg p-4 mt-2">
-            <p className="text-sm text-slate-700 mb-3 leading-snug">
-              Login with Kite daily to refresh real-time NSE data.
-            </p>
-            <Button className="w-full bg-[#FF5722] hover:bg-[#E64A19] text-white shadow-sm">
-              Login with Kite <ChevronRight className="w-4 h-4 ml-1" />
-            </Button>
+      <aside className="w-72 flex-shrink-0 border-r border-slate-200 bg-white flex flex-col h-full overflow-y-auto print:hidden">
+        {/* Logo */}
+        <div className="px-5 py-4 border-b border-slate-200">
+          <div className="flex items-center gap-2">
+            <Zap className="w-5 h-5 text-amber-500 fill-amber-500" />
+            <div>
+              <p className="font-bold text-slate-900 leading-tight">Quant Terminal</p>
+              <p className="text-xs text-slate-400 font-mono">V8.4 Premium</p>
+            </div>
           </div>
         </div>
 
-        <div className="p-6 border-b border-slate-200 space-y-5">
-          <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
-            <Settings2 className="w-3 h-3" /> Risk Settings
-          </h2>
-          <div className="space-y-2">
-            <label className="text-xs font-semibold text-slate-600">Capital Per Trade (₹)</label>
-            <Input defaultValue="33000" className="h-8 bg-white" />
+        <div className="flex-1 p-4 overflow-y-auto">
+          {/* ── Stock List Upload ── */}
+          <div className="border-b border-slate-200 pb-4 mb-4">
+            <button onClick={() => toggleSection('stockList')} className="flex items-center justify-between w-full mb-3 text-left">
+              <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-slate-500">
+                <Upload className="w-3.5 h-3.5" /> Stock List
+              </span>
+              {sectionsOpen.stockList ? <ChevronDown className="w-3.5 h-3.5 text-slate-400" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-400" />}
+            </button>
+            {sectionsOpen.stockList && (
+              <>
+                <label className="flex flex-col items-center gap-2 cursor-pointer border-2 border-dashed border-slate-200 rounded-xl p-4 hover:border-blue-400 hover:bg-blue-50/50 transition-colors">
+                  <Upload className="w-5 h-5 text-slate-400" />
+                  <div className="text-center">
+                    <p className="text-xs font-semibold text-slate-600">Upload NSE CSV</p>
+                    <p className="text-xs text-slate-400">Requires SYMBOL column</p>
+                  </div>
+                  <input ref={fileInputRef} type="file" accept=".csv" className="hidden" onChange={handleFileUpload} />
+                </label>
+                {screening && (
+                  <div className="mt-3 space-y-2">
+                    <div className="flex items-center gap-2 justify-center">
+                      <div className="w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                      <p className="text-xs text-blue-600 font-semibold">
+                        Screening {screenProgress.done}/{screenProgress.total}...
+                      </p>
+                    </div>
+                    <div className="w-full bg-slate-100 rounded-full h-1.5">
+                      <div
+                        className="bg-blue-500 h-1.5 rounded-full transition-all"
+                        style={{ width: screenProgress.total > 0 ? `${(screenProgress.done / screenProgress.total) * 100}%` : '0%' }}
+                      />
+                    </div>
+                  </div>
+                )}
+                {!screening && csvLoaded && stocks.length > 0 && (
+                  <p className="mt-2 text-xs text-emerald-600 font-semibold text-center">
+                    ✓ {stocks.length} stocks screened · {v4Count} V4 signals
+                  </p>
+                )}
+                {csvError && <p className="mt-2 text-xs text-red-500 font-medium">{csvError}</p>}
+                {!csvLoaded && !screening && (
+                  <p className="mt-2 text-xs text-slate-400 text-center">
+                    Upload NSE CSV to start screening
+                  </p>
+                )}
+              </>
+            )}
           </div>
+
+          {/* ── Risk Settings ── */}
+          <div className="border-b border-slate-200 pb-4 mb-4">
+            <button onClick={() => toggleSection('risk')} className="flex items-center justify-between w-full mb-3 text-left">
+              <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-slate-500">
+                <IndianRupee className="w-3.5 h-3.5" /> Risk Settings
+              </span>
+              {sectionsOpen.risk ? <ChevronDown className="w-3.5 h-3.5 text-slate-400" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-400" />}
+            </button>
+            {sectionsOpen.risk && (
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1 font-medium">Capital Per Trade (₹)</label>
+                  <input
+                    type="number"
+                    value={settings.capitalPerTrade}
+                    onChange={e => setSettings(s => ({ ...s, capitalPerTrade: Number(e.target.value) }))}
+                    className="w-full px-3 py-1.5 text-sm border border-slate-200 rounded-lg bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1 font-medium">Min Daily Traded Val (₹L)</label>
+                  <input
+                    type="number"
+                    value={settings.minTradeValLakhs}
+                    onChange={e => setSettings(s => ({ ...s, minTradeValLakhs: Number(e.target.value) }))}
+                    className="w-full px-3 py-1.5 text-sm border border-slate-200 rounded-lg bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ── Integrations Info ── */}
+          <div className="pb-4 mb-4">
+            <button onClick={() => toggleSection('integrations')} className="flex items-center justify-between w-full mb-3 text-left">
+              <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-slate-500">
+                <BarChart2 className="w-3.5 h-3.5" /> Data Sources
+              </span>
+              {sectionsOpen.integrations ? <ChevronDown className="w-3.5 h-3.5 text-slate-400" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-400" />}
+            </button>
+            {sectionsOpen.integrations && (
+              <div className="space-y-2 text-xs text-slate-500">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0" />
+                  <span><b>Yahoo Finance</b> — OHLCV + RSI + ATR</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0" />
+                  <span><b>Screener.in</b> — PE, ROE, MCap, Growth</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-amber-500 flex-shrink-0" />
+                  <span><b>TradingView</b> — Charts on Tear Sheet</span>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="p-4 border-t border-slate-200 space-y-2">
+          <button
+            onClick={handlePrint}
+            className="flex items-center gap-2 w-full px-3 py-2 text-xs font-semibold text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+          >
+            <Printer className="w-3.5 h-3.5" /> Print / Save as PDF
+          </button>
+          <button
+            onClick={handleClear}
+            className="flex items-center gap-2 w-full px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+          >
+            <Trash2 className="w-3.5 h-3.5" /> Clear Cache & Reset
+          </button>
         </div>
       </aside>
 
       {/* ─── MAIN CONTENT ─── */}
-      <main className="flex-1 flex flex-col h-full bg-white relative">
-        <div className="absolute top-4 left-6 flex gap-3 z-10">
-          <Badge variant="outline" className="bg-slate-50 text-slate-600">{LIVE_STOCKS.length} Stocks</Badge>
-          <Badge className="bg-green-100 text-green-800 hover:bg-green-100 border-green-200">
-            {LIVE_STOCKS.filter(s => s.v4Signal).length} V4 Signals
-          </Badge>
-          <Badge variant="outline" className="bg-slate-50 text-slate-500">Data: {LIVE_FETCH_TIME}</Badge>
-        </div>
-
-        <Tabs defaultValue="overview" className="flex-1 flex flex-col h-full" onValueChange={setActiveTab}>
-          <div className="border-b border-slate-200 pt-3 px-6 flex justify-center">
-            <TabsList className="bg-transparent border-none w-full max-w-md justify-between">
-              <TabsTrigger value="overview" className="data-[state=active]:bg-slate-100 data-[state=active]:shadow-none rounded-t-lg rounded-b-none px-6">Overview</TabsTrigger>
-              <TabsTrigger value="screener" className="data-[state=active]:bg-slate-100 data-[state=active]:shadow-none rounded-t-lg rounded-b-none px-6">Full Screener</TabsTrigger>
-              <TabsTrigger value="tearsheet" className="data-[state=active]:bg-slate-100 data-[state=active]:shadow-none rounded-t-lg rounded-b-none px-6">Tear Sheet</TabsTrigger>
-            </TabsList>
+      <main className="flex-1 flex flex-col h-full bg-white relative overflow-hidden print:overflow-visible">
+        {/* ── TOP BAR: badges + tabs ── */}
+        <div className="border-b border-slate-200 px-6 pt-3 pb-0 flex flex-col print:hidden">
+          {/* Status badges */}
+          <div className="flex items-center gap-3 mb-3">
+            <span className="text-xs font-bold text-slate-500 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-md">
+              {stocks.length} Stocks
+            </span>
+            {v4Count > 0 && (
+              <span className="text-xs font-bold text-green-700 bg-green-100 border border-green-200 px-2.5 py-1 rounded-md flex items-center gap-1">
+                <Zap className="w-3 h-3 fill-green-600" /> {v4Count} V4 Signals
+              </span>
+            )}
           </div>
 
-          {/* ─── OVERVIEW TAB ─── */}
-          <TabsContent value="overview" className="flex-1 overflow-y-auto p-8 m-0 outline-none">
-            {/* Market Indices */}
-            <div className="grid grid-cols-4 gap-4 mb-8">
-              {LIVE_INDICES.map((idx) => (
-                <Card key={idx.name} className="shadow-none border-slate-200 bg-slate-50/50">
-                  <CardContent className="p-4">
-                    <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">{idx.name}</p>
-                    <div className="flex items-baseline justify-between">
-                      <p className="text-xl font-bold text-slate-800">{idx.price.toLocaleString()}</p>
-                      <p className={`text-sm font-medium flex items-center ${idx.change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        {idx.change >= 0 ? <TrendingUp className="w-3 h-3 mr-1"/> : <TrendingDown className="w-3 h-3 mr-1"/>}
-                        {(idx.change * 100).toFixed(2)}%
-                      </p>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+          {/* Tab bar */}
+          <div className="flex gap-1">
+            {tabs.map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`px-5 py-2.5 text-sm font-semibold rounded-t-lg transition-colors ${
+                  activeTab === tab.id
+                    ? 'bg-slate-100 text-slate-900 border border-b-0 border-slate-200 -mb-px'
+                    : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
 
-            {/* Quick Filters */}
-            <div className="flex flex-wrap items-center justify-between mb-4 gap-4">
-              <div className="flex flex-wrap gap-2">
-                {['V4 Signals', 'Quality', 'Monopoly', 'Emerging', 'Momentum'].map((filterName) => (
-                  <Badge 
-                    key={filterName} 
-                    variant={overviewFilter === filterName ? 'default' : 'secondary'}
-                    className={`cursor-pointer px-3 py-1 text-xs font-medium transition-colors ${overviewFilter === filterName ? 'bg-slate-800 text-white hover:bg-slate-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-                    onClick={() => setOverviewFilter(filterName)}
-                  >
-                    {filterName}
-                  </Badge>
-                ))}
-              </div>
-              <div className="relative w-64">
-                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-                <Input 
-                  placeholder="Quick search..." 
-                  className="pl-9 h-9 bg-slate-50"
-                  value={overviewSearch}
-                  onChange={(e) => setOverviewSearch(e.target.value)}
-                />
-              </div>
-            </div>
+        {/* ── Print Header (only visible when printing) ── */}
+        <div className="hidden print:block px-6 py-4 border-b border-slate-200">
+          <h1 className="text-xl font-bold flex items-center gap-2">
+            <Zap className="w-5 h-5" /> Quant Terminal V8.4 — Screening Report
+          </h1>
+          <p className="text-sm text-slate-500 mt-1">
+            {stocks.length} stocks · {v4Count} V4 signals · Printed {new Date().toLocaleDateString('en-IN')}
+          </p>
+        </div>
 
-            {/* Anti-Squish Table Container */}
-            <div className="border border-slate-200 rounded-lg overflow-x-auto">
-              <table className="w-full text-sm text-left min-w-[800px]">
-                <thead className="bg-slate-50 border-b border-slate-200 text-xs text-slate-500 uppercase font-bold tracking-wider">
-                  <tr>
-                    <th className="px-4 py-3 whitespace-nowrap">Ticker</th>
-                    <th className="px-4 py-3 whitespace-nowrap">Rating</th>
-                    <th className="px-4 py-3 whitespace-nowrap">V4 Signal</th>
-                    <th className="px-4 py-3 whitespace-nowrap text-right">Price (₹)</th>
-                    <th className="px-4 py-3 whitespace-nowrap text-right">Change</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200">
-                  {overviewStocks.slice(0, 50).map((stock) => (
-                    <tr key={stock.ticker} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="px-4 py-3 font-bold text-slate-800 whitespace-nowrap">{stock.ticker}</td>
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        <Badge className={`font-medium shadow-none ${getBadgeStyle(stock.rating)}`}>
-                          {stock.rating.replace(/['"🔴🟢🟡🔵👑⚠️]/g, '').trim()}
-                        </Badge>
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        {stock.v4Signal ? (
-                          <span className="text-green-600 font-bold flex items-center gap-1.5 text-xs bg-green-50 px-2 py-1 rounded-md w-fit border border-green-100">
-                            <Zap className="w-3 h-3 fill-green-600" /> PASS
-                          </span>
-                        ) : (<span className="text-slate-300">—</span>)}
-                      </td>
-                      <td className="px-4 py-3 text-right font-mono font-medium text-slate-700 whitespace-nowrap">
-                        {stock.price.toLocaleString(undefined, {minimumFractionDigits: 2})}
-                      </td>
-                      <td className={`px-4 py-3 text-right font-medium whitespace-nowrap ${stock.change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        {stock.change > 0 ? '+' : ''}{(stock.change * 100).toFixed(2)}%
-                      </td>
-                    </tr>
-                  ))}
-                  {overviewStocks.length === 0 && (
-                    <tr>
-                      <td colSpan={5} className="px-4 py-8 text-center text-slate-500">No stocks match the current filter.</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </TabsContent>
-
-          {/* ─── SCREENER TAB ─── */}
-          <TabsContent value="screener" className="flex-1 flex flex-col p-8 m-0 outline-none overflow-hidden h-full">
-            <div className="flex flex-col gap-4 mb-4">
-              <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                <Filter className="w-5 h-5 text-blue-500" /> Master Database Screener
-              </h2>
-              
-              <div className="flex flex-wrap items-center justify-between bg-slate-50 border border-slate-200 p-3 rounded-xl gap-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold text-slate-400 mr-2 uppercase tracking-wider">Tier:</span>
-                  <select 
-                    className="text-sm bg-white border border-slate-200 rounded-md px-3 py-1.5 outline-none focus:ring-2 focus:ring-blue-500"
-                    value={screenerTier}
-                    onChange={(e) => setScreenerTier(e.target.value)}
-                  >
-                    <option value="All Tiers">All Tiers</option>
-                    <option value="👑 TIER 1: MONOPOLY">Tier 1: Monopoly</option>
-                    <option value="🟢 TIER 2: QUALITY">Tier 2: Quality</option>
-                    <option value="⚠️ TIER 2: PROVISIONAL (Missing Data)">Tier 2: Provisional</option>
-                    <option value="🟡 TIER 3: EMERGING">Tier 3: Emerging</option>
-                    <option value="🔵 TIER 4: MOMENTUM">Tier 4: Momentum</option>
-                  </select>
-                </div>
-
-                <div className="flex items-center gap-4">
-                  <Button 
-                    variant={screenerV4Only ? "default" : "outline"}
-                    className={`h-8 px-3 text-xs gap-1.5 transition-all ${screenerV4Only ? 'bg-green-500 hover:bg-green-600 text-white border-green-500' : 'bg-white text-slate-600'}`}
-                    onClick={() => setScreenerV4Only(!screenerV4Only)}
-                  >
-                    <Zap className={`w-3.5 h-3.5 ${screenerV4Only ? 'fill-white' : ''}`} /> 
-                    {screenerV4Only ? 'V4 Signals Only' : 'Show All'}
-                  </Button>
-                  <div className="relative w-64">
-                    <Search className="absolute left-2.5 top-2 h-4 w-4 text-slate-400" />
-                    <Input 
-                      placeholder="Search ticker..." 
-                      className="pl-9 h-8 bg-white"
-                      value={screenerSearch}
-                      onChange={(e) => setScreenerSearch(e.target.value)}
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <p className="text-xs text-slate-400 mb-2">{screenerStocks.length} records found</p>
-
-            <div className="flex-1 border border-slate-200 rounded-lg overflow-auto">
-              <table className="w-full text-sm text-left min-w-[1000px]">
-                <thead className="bg-slate-50 sticky top-0 z-10 shadow-sm text-xs text-slate-500 uppercase font-bold tracking-wider">
-                  <tr>
-                    <th className="px-4 py-3 whitespace-nowrap">Ticker</th>
-                    <th className="px-4 py-3 whitespace-nowrap">Sector</th>
-                    <th className="px-4 py-3 whitespace-nowrap">Rating</th>
-                    <th className="px-4 py-3 whitespace-nowrap">V4 Signal</th>
-                    <th className="px-4 py-3 whitespace-nowrap text-right">Price (₹)</th>
-                    <th className="px-4 py-3 whitespace-nowrap text-right">RSI</th>
-                    <th className="px-4 py-3 whitespace-nowrap text-right">1Y Return</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200">
-                  {screenerStocks.map((stock) => (
-                    <tr key={stock.ticker} className={`transition-colors ${stock.v4Signal ? "bg-green-50/40 hover:bg-green-50" : "hover:bg-slate-50/50"}`}>
-                      <td className="px-4 py-3 font-bold text-slate-800 whitespace-nowrap">{stock.ticker}</td>
-                      <td className="px-4 py-3 text-slate-500 text-xs whitespace-nowrap">{stock.sector}</td>
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        <Badge className={`font-medium text-[11px] shadow-none ${getBadgeStyle(stock.rating)}`}>
-                          {stock.rating.replace(/['"🔴🟢🟡🔵👑⚠️]/g, '').trim()}
-                        </Badge>
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        {stock.v4Signal ? (
-                          <span className="text-green-600 font-bold flex items-center gap-1 text-[11px] bg-green-100 px-2 py-0.5 rounded border border-green-200 w-fit">
-                            <Zap className="w-3 h-3 fill-green-600" /> PASS
-                          </span>
-                        ) : (<span className="text-slate-300">—</span>)}
-                      </td>
-                      <td className="px-4 py-3 text-right font-mono font-medium text-slate-700 whitespace-nowrap">
-                        {stock.price.toLocaleString(undefined, {minimumFractionDigits: 2})}
-                      </td>
-                      <td className={`px-4 py-3 text-right font-mono font-medium whitespace-nowrap ${stock.rsi >= 70 ? 'text-red-500' : stock.rsi <= 40 ? 'text-blue-500' : 'text-slate-600'}`}>
-                        {stock.rsi.toFixed(1)}
-                      </td>
-                      <td className={`px-4 py-3 text-right font-mono font-medium whitespace-nowrap ${stock.ret1y >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        {stock.ret1y > 0 ? '+' : ''}{(stock.ret1y * 100).toFixed(1)}%
-                      </td>
-                    </tr>
-                  ))}
-                  {screenerStocks.length === 0 && (
-                    <tr>
-                      <td colSpan={7} className="px-4 py-12 text-center text-slate-500">No stocks match the current filters.</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </TabsContent>
-
-          {/* ─── TEAR SHEET TAB (Placeholder) ─── */}
-          <TabsContent value="tearsheet" className="p-8 flex items-center justify-center h-full">
-            <div className="text-center text-slate-400">
-               <BarChart2 className="w-12 h-12 mx-auto mb-3 opacity-30" />
-               <p>Tear Sheet Component goes here.</p>
-            </div>
-          </TabsContent>
-
-        </Tabs>
+        {/* ── TAB CONTENT ── */}
+        <div className="flex-1 overflow-y-auto p-6">
+          {activeTab === 'overview' && (
+            <OverviewTab
+              stocks={stocks}
+              portfolio={portfolio}
+              onSelectTicker={setSelectedTicker}
+              onNavigateToTearSheet={navigateToTearSheet}
+            />
+          )}
+          {activeTab === 'screener' && (
+            <ScreenerTab
+              stocks={stocks}
+              portfolio={portfolio}
+              onAddToPortfolio={addToPortfolio}
+              onSelectTicker={setSelectedTicker}
+              onNavigateToTearSheet={navigateToTearSheet}
+            />
+          )}
+          {activeTab === 'tearsheet' && (
+            <TearSheetTab
+              stocks={stocks}
+              selectedTicker={selectedTicker || (stocks[0]?.ticker ?? '')}
+              onSelectTicker={setSelectedTicker}
+              portfolio={portfolio}
+              onAddToPortfolio={addToPortfolio}
+              isDark={false}
+              capitalPerTrade={settings.capitalPerTrade}
+            />
+          )}
+        </div>
       </main>
     </div>
   );

@@ -68,3 +68,15 @@
 
 /* TradingView widget container fix */
 .tradingview-widget-container { height: 100%; width: 100%; }
+
+/* Print styles */
+@media print {
+  body { background: white !important; }
+  aside, .print\\:hidden { display: none !important; }
+  .print\\:overflow-visible { overflow: visible !important; }
+  .print\\:h-auto { height: auto !important; }
+  .print\\:block { display: block !important; }
+  table { page-break-inside: auto; }
+  tr { page-break-inside: avoid; }
+  thead { display: table-header-group; }
+}

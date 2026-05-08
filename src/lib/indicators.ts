@@ -131,7 +131,7 @@ export function classifyCompounder(
 // Rule 1 — Liquidity:    tradedVal >= ₹50 Lakhs (or min_trade_val)
 // Rule 2 — Proximity:    price >= 52wHigh * 0.95
 // Rule 3 — Volume Surge: max(vol last 3d) >= 1.5 × avg(vol 20d)
-// Rule 4 — Momentum:     50 <= RSI <= 75  (INCLUSIVE — V8.4 uses <=)
+// Rule 4 — Momentum:     50 < RSI < 75  (STRICT — user confirmed)
 // Rule 5 — Quality:      score >= 4 (includes PROVISIONAL with score 4)
 export function calcV4Signal(
   price: number,
@@ -152,8 +152,8 @@ export function calcV4Signal(
   const maxVol3d = Math.max(...volumes.slice(-3));
   if (maxVol3d < 1.5 * avgVol20) return false;
 
-  // Rule 4: RSI INCLUSIVE between 50 and 75 (V8.4: 50 <= rsi <= 75)
-  if (rsi < 50 || rsi > 75) return false;
+  // Rule 4: RSI STRICT between 50 and 75 (50 < rsi < 75)
+  if (rsi <= 50 || rsi >= 75) return false;
 
   // Rule 5: Quality — must be score >= 4 (Tier 1, Tier 2, or PROVISIONAL)
   if (score !== null && score < 4) return false;

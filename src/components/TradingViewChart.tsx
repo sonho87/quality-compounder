@@ -27,8 +27,17 @@ export default function TradingViewChart({
     container.innerHTML = '';
 
     // TradingView Advanced Chart — official external embed
-    // Config is passed as JSON inside the script's innerHTML.
-    // Docs: https://www.tradingview.com/widget-docs/widgets/charts/advanced-chart/
+    // The widget requires a specific DOM structure:
+    //   <div class="tradingview-widget-container">
+    //     <div class="tradingview-widget-container__widget"></div>
+    //     <script src="...">{ config JSON }</script>
+    //   </div>
+    const widgetDiv = document.createElement('div');
+    widgetDiv.className = 'tradingview-widget-container__widget';
+    widgetDiv.style.height = '100%';
+    widgetDiv.style.width = '100%';
+    container.appendChild(widgetDiv);
+
     const script = document.createElement('script');
     script.src = 'https://s.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
     script.type = 'text/javascript';

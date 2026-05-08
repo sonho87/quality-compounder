@@ -76,19 +76,12 @@ export interface NewsItem {
   date: string;
 }
 
-export type DataSource = 'mock' | 'csv' | 'dhan' | 'kite';
+export type DataSource = 'csv' | 'mock';
 
 export interface AppSettings {
   capitalPerTrade: number;
   minTradeValLakhs: number;
   dataSource: DataSource;
-  dhanClientId: string;
-  dhanAccessToken: string;
-  kiteApiKey: string;
-  kiteApiSecret: string;
-  kiteAccessToken: string;
-  kiteProxyUrl: string;
-  geminiApiKey: string;
 }
 
 export interface ChatMessage {
