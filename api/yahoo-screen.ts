@@ -243,16 +243,15 @@ function parseScreenerHTML(html: string): Fundamentals {
       return isNaN(val) ? null : val;
     };
 
-    // Extract sector from breadcrumb or company heading
-    const sectorMatch = html.match(/class="sub-heading"[^>]*>\s*<a[^>]*>([^<]+)/i);
+    // Extract sector from Screener.in breadcrumb: title="Broad Sector">Energy</a>
+    const sectorMatch = html.match(/title="Broad Sector">([^<]+)/i);
     const sector = sectorMatch ? sectorMatch[1].trim() : 'N/A';
 
-    // Market Cap (in Cr)
-    const mcapMatch = html.match(/Market\s*Cap[^<]*<[^>]*>[\s\S]*?<span[^>]*class="number"[^>]*>([\d,.]+)/i);
+    // Market Cap (in Cr) — Screener shows Indian-format number e.g. "19,42,866"
+    const mcapNum = extractNum('Market Cap');
     let mcap = 'N/A';
-    if (mcapMatch) {
-      const mcapVal = parseFloat(mcapMatch[1].replace(/,/g, ''));
-      if (!isNaN(mcapVal)) mcap = `₹${Math.round(mcapVal)} Cr`;
+    if (mcapNum !== null) {
+      mcap = `₹${mcapNum.toLocaleString('en-IN')} Cr`;
     }
 
     const pe = extractNum('Stock P/E');
