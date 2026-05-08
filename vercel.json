@@ -1,10 +1,7 @@
 {
   "functions": {
-    "api/kite-data.ts": {
+    "api/yahoo-screen.ts": {
       "maxDuration": 60
-    },
-    "api/kite-callback.ts": {
-      "maxDuration": 15
     }
   },
   "rewrites": [
