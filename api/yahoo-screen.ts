@@ -267,8 +267,9 @@ function parseScreenerHTML(html: string): Fundamentals {
     const dyNum = extractNum('Dividend Yield');
     const divYield = dyNum !== null ? `${dyNum.toFixed(2)}%` : '0.00%';
 
-    // Consistent Growth: check if 3-year profit CAGR is positive
-    const profitGrowthMatch = html.match(/Profit\s*Growth[^<]*(?:3\s*Years?|CAGR)[^<]*<[^>]*>[\s\S]*?<span[^>]*class="number"[^>]*>([-\d,.]+)/i);
+    // Consistent Growth: check if 3-year compounded profit growth is positive
+    // Screener HTML: <th>Compounded Profit Growth</th>...<td>3 Years:</td><td>7%</td>
+    const profitGrowthMatch = html.match(/Compounded Profit Growth[\s\S]*?3\s*Years?:\s*<\/td>\s*<td[^>]*>\s*([-\d,.]+)\s*%/i);
     let consistentGrowth: boolean | null = null;
     if (profitGrowthMatch) {
       const pg = parseFloat(profitGrowthMatch[1].replace(/,/g, ''));
@@ -390,12 +391,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const errors: string[] = [];
 
   // Process each symbol: fetch OHLCV + fundamentals, then screen
+  // Screener.in fetches are staggered 150ms apart to avoid IP bans
   const settled = await Promise.allSettled(
-    batch.map(async (sym) => {
+    batch.map(async (sym, idx) => {
       const fullSymbol = sym.endsWith('.NS') || sym.endsWith('.BO') ? sym : `${sym}.NS`;
       const [bars, fund] = await Promise.all([
         fetchYahooOHLCV(fullSymbol),
-        fetchScreenerFundamentals(fullSymbol),
+        new Promise<Fundamentals>(resolve =>
+          setTimeout(() => fetchScreenerFundamentals(fullSymbol).then(resolve), idx * 150)
+        ),
       ]);
       return screenStock(fullSymbol, bars, fund, capital);
     })

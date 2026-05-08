@@ -1,4 +1,4 @@
-import type { OHLCV, NewsItem } from './types';
+import type { NewsItem } from './types';
 
 // --- CSV Parser: reads SYMBOL column, returns NSE tickers ---
 // Handles NSE MarketWatch CSV format:
@@ -50,67 +50,6 @@ export function parseCSVSymbols(csvText: string): string[] {
       return sym.endsWith('.NS') || sym.endsWith('.BO') ? sym : `${sym}.NS`;
     })
     .filter(Boolean) as string[];
-}
-
-// --- Dhan Historical Data Fetcher ---
-// Dhan API: POST https://api.dhan.co/v2/charts/historical
-// CORS note: Dhan allows browser requests with proper headers
-export async function fetchDhanHistorical(
-  securityId: string,
-  clientId: string,
-  accessToken: string,
-  fromDate: string,
-  toDate: string
-): Promise<OHLCV[]> {
-  const res = await fetch('https://api.dhan.co/v2/charts/historical', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'client-id': clientId,
-      'access-token': accessToken,
-    },
-    body: JSON.stringify({
-      securityId,
-      exchangeSegment: 'NSE_EQ',
-      instrument: 'EQUITY',
-      expiryCode: 0,
-      oi: false,
-      fromDate,
-      toDate,
-      interval: '1',
-    }),
-  });
-  if (!res.ok) throw new Error(`Dhan API error: ${res.status} ${res.statusText}`);
-  const data = await res.json();
-  // Dhan response shape: { open: [], high: [], low: [], close: [], volume: [], timestamp: [] }
-  const { open, high, low, close, volume, timestamp } = data;
-  return (timestamp as number[]).map((ts, i) => ({
-    date: new Date(ts * 1000).toISOString().split('T')[0],
-    open: open[i],
-    high: high[i],
-    low: low[i],
-    close: close[i],
-    volume: volume[i],
-  }));
-}
-
-// --- Kite (Zerodha) Historical Data via backend proxy ---
-// Kite API is CORS-blocked — requires a backend proxy
-// Proxy endpoint: GET /api/kite/historical?symbol=RELIANCE&interval=day&from=2022-01-01&to=2025-01-01
-export async function fetchKiteHistorical(
-  symbol: string,
-  proxyUrl: string,
-  from: string,
-  to: string
-): Promise<OHLCV[]> {
-  const url = `${proxyUrl}/api/kite/historical?symbol=${symbol}&interval=day&from=${from}&to=${to}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Kite proxy error: ${res.status}`);
-  const data = await res.json();
-  // Expected response: { data: { candles: [[date, open, high, low, close, volume]] } }
-  return (data.data.candles as [string, number, number, number, number, number][]).map(
-    ([date, open, high, low, close, volume]) => ({ date, open, high, low, close, volume })
-  );
 }
 
 // --- Google News RSS (proxied via allorigins to avoid CORS) ---
